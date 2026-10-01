@@ -36,7 +36,8 @@ def error_level_analysis(rgb: np.ndarray, quality: int = 90, amplify: float | No
     diff = cv2.absdiff(bgr, resaved).astype(np.float32)
     error_map = diff.mean(axis=2)
     max_error = float(diff.max())
-    scale = amplify if amplify is not None else (255.0 / max(max_error, 1.0))
+    # Scale by a high percentile rather than the max so a few outlier pixels don't leave the map almost black.
+    scale = amplify if amplify is not None else (255.0 / max(float(np.percentile(diff, 99.5)), 1.0))
     ela_bgr = np.clip(diff * scale, 0, 255).astype(np.uint8)
 
     gray = np.clip(error_map * scale, 0, 255).astype(np.uint8)

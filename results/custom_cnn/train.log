@@ -1,0 +1,38 @@
+[EYE FOR AI] device=cpu amp=False run_dir=/home/user/EYE-FOR-AI/outputs/runs/custom_cnn-20261001-065023
+[data] train=14700 val=3150 test=3150
+Epoch 01/15 | train loss 0.6678 acc 0.6070 | val loss 0.6169 acc 0.6321 f1 0.6402 auc 0.7162 | 201s
+  -> saved new best model (val F1 0.6402)
+Epoch 02/15 | train loss 0.6181 acc 0.6474 | val loss 0.5835 acc 0.6771 f1 0.7191 auc 0.7755 | 161s
+  -> saved new best model (val F1 0.7191)
+Epoch 03/15 | train loss 0.5796 acc 0.6879 | val loss 0.6563 acc 0.6438 f1 0.7320 auc 0.7976 | 164s
+  -> saved new best model (val F1 0.7320)
+Epoch 04/15 | train loss 0.5439 acc 0.7198 | val loss 0.5054 acc 0.7527 f1 0.7416 auc 0.8514 | 157s
+  -> saved new best model (val F1 0.7416)
+Epoch 05/15 | train loss 0.5281 acc 0.7376 | val loss 0.5377 acc 0.7340 f1 0.7491 auc 0.8273 | 158s
+  -> saved new best model (val F1 0.7491)
+Epoch 06/15 | train loss 0.5062 acc 0.7575 | val loss 0.5186 acc 0.7495 f1 0.7658 auc 0.8518 | 168s
+  -> saved new best model (val F1 0.7658)
+Epoch 07/15 | train loss 0.4914 acc 0.7630 | val loss 0.5412 acc 0.7340 f1 0.7256 auc 0.8470 | 162s
+Epoch 08/15 | train loss 0.4752 acc 0.7801 | val loss 0.5008 acc 0.7629 f1 0.7944 auc 0.8859 | 161s
+  -> saved new best model (val F1 0.7944)
+Epoch 09/15 | train loss 0.4626 acc 0.7961 | val loss 0.5361 acc 0.7603 f1 0.7886 auc 0.8681 | 171s
+Epoch 10/15 | train loss 0.4514 acc 0.7999 | val loss 0.4608 acc 0.7851 f1 0.7746 auc 0.8898 | 167s
+Epoch 11/15 | train loss 0.4466 acc 0.8055 | val loss 0.4470 acc 0.8010 f1 0.7937 auc 0.8954 | 171s
+Epoch 12/15 | train loss 0.4319 acc 0.8139 | val loss 0.4664 acc 0.7984 f1 0.8130 auc 0.8978 | 169s
+  -> saved new best model (val F1 0.8130)
+Epoch 13/15 | train loss 0.4250 acc 0.8175 | val loss 0.4396 acc 0.8156 f1 0.8238 auc 0.9075 | 163s
+  -> saved new best model (val F1 0.8238)
+Epoch 14/15 | train loss 0.4190 acc 0.8238 | val loss 0.4334 acc 0.8171 f1 0.8239 auc 0.9087 | 169s
+  -> saved new best model (val F1 0.8239)
+Epoch 15/15 | train loss 0.4147 acc 0.8315 | val loss 0.4278 acc 0.8194 f1 0.8245 auc 0.9115 | 166s
+  -> saved new best model (val F1 0.8245)
+[best epoch 15] test results:
+              precision    recall  f1-score   support
+        REAL     0.8340    0.7975    0.8153      1575
+        FAKE     0.8060    0.8413    0.8232      1575
+    accuracy                         0.8194      3150
+   macro avg     0.8200    0.8194    0.8193      3150
+weighted avg     0.8200    0.8194    0.8193      3150
+ROC-AUC: 0.9080
+[done] artifacts in /home/user/EYE-FOR-AI/outputs/runs/custom_cnn-20261001-065023
+[done] deployable checkpoint: /home/user/EYE-FOR-AI/models/custom_cnn_best.pt

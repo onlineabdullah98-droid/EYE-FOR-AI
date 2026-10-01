@@ -6,7 +6,7 @@ real/fake (CIFAKE, 140k faces) or Au/Tp (CASIA). Images are not copied.
 Examples:
   python scripts/prepare_dataset.py --source data/raw/cifake
   python scripts/prepare_dataset.py --source data/raw/cifake --max-per-class 10000   # quick experiments
-  python scripts/prepare_dataset.py --source data/raw/casia2 data/raw/cifake        # combine datasets
+  python scripts/prepare_dataset.py --source data/raw/cifake data/raw/faces140k --max-per-class 6000  # combine
 """
 
 from __future__ import annotations
@@ -28,20 +28,25 @@ def main() -> None:
     parser.add_argument("--out", default=str(SPLITS_DIR))
     parser.add_argument("--val-size", type=float, default=0.15)
     parser.add_argument("--test-size", type=float, default=0.15)
-    parser.add_argument("--max-per-class", type=int, default=None, help="Subsample for faster experiments")
+    parser.add_argument("--max-per-class", type=int, default=None,
+                        help="Max images per class from EACH source (faster experiments, balanced mixing)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    samples = [s for src in args.source for s in scan_directory(src)]
+    rng = random.Random(args.seed)
+    samples = []
+    for src in args.source:
+        found = scan_directory(src)
+        if args.max_per_class:  # cap each source separately so a small dataset is not drowned out when combining
+            by_label: dict[int, list] = {0: [], 1: []}
+            for s in found:
+                by_label[s[1]].append(s)
+            found = [s for lbl in by_label
+                     for s in rng.sample(by_label[lbl], min(args.max_per_class, len(by_label[lbl])))]
+        print(f"{src}: {len(found)} images")
+        samples += found
     if not samples:
         raise SystemExit("No labelled images found. Folder names must be real/fake or Au/Tp (case-insensitive).")
-
-    if args.max_per_class:
-        rng = random.Random(args.seed)
-        by_label: dict[int, list] = {0: [], 1: []}
-        for s in samples:
-            by_label[s[1]].append(s)
-        samples = [s for lbl in by_label for s in rng.sample(by_label[lbl], min(args.max_per_class, len(by_label[lbl])))]
 
     labels = [lbl for _, lbl in samples]
     holdout = args.val_size + args.test_size

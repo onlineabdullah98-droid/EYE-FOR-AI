@@ -85,3 +85,27 @@ def test_end_to_end(tiny_dataset, tmp_path, monkeypatch):
     assert result.gradcam_overlay.shape == result.image.shape
     assert result.ela is not None
     assert predictor.predict(fake_img.read_bytes()).label == result.label
+
+
+def test_hf_parquet_labels_mapped_by_name(tmp_path):
+    """CIFAKE on HuggingFace uses 0=FAKE, 1=REAL; folders must follow the names, not the ids."""
+    import json
+    from collections import Counter
+
+    import cv2
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from download_data import _extract_parquet
+
+    ok, png = cv2.imencode(".png", np.zeros((8, 8, 3), np.uint8))
+    table = pa.table({"image": [{"bytes": png.tobytes(), "path": None}] * 3, "label": [0, 1, 1]})
+    meta = {"info": {"features": {"image": {"_type": "Image"},
+                                  "label": {"names": ["FAKE", "REAL"], "_type": "ClassLabel"}}}}
+    table = table.replace_schema_metadata({"huggingface": json.dumps(meta)})
+    pq.write_table(table, tmp_path / "train.parquet")
+
+    _extract_parquet(tmp_path / "train.parquet", "train", tmp_path / "out", Counter(), None)
+    labels = Counter(label for _, label in scan_directory(tmp_path / "out"))
+    assert labels == {FAKE_LABEL: 1, REAL_LABEL: 2}

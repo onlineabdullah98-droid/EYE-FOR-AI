@@ -1,0 +1,28 @@
+[EYE FOR AI] device=cpu amp=False run_dir=/home/user/EYE-FOR-AI/outputs/runs/efficientnet_b0-20261001-055332
+[data] train=14700 val=3150 test=3150
+[stage 1] backbone frozen for 2 epoch(s) - training classification head only
+Epoch 01/8 | train loss 0.5911 acc 0.6946 | val loss 0.5708 acc 0.7194 f1 0.7429 auc 0.8019 | 223s
+  -> saved new best model (val F1 0.7429)
+Epoch 02/8 | train loss 0.5671 acc 0.7207 | val loss 0.5691 acc 0.7248 f1 0.7295 auc 0.7951 | 218s
+[stage 2] backbone unfrozen - fine-tuning the whole network
+Epoch 03/8 | train loss 0.4697 acc 0.7972 | val loss 0.3752 acc 0.8632 f1 0.8649 auc 0.9367 | 482s
+  -> saved new best model (val F1 0.8649)
+Epoch 04/8 | train loss 0.3657 acc 0.8640 | val loss 0.3197 acc 0.8933 f1 0.8958 auc 0.9615 | 501s
+  -> saved new best model (val F1 0.8958)
+Epoch 05/8 | train loss 0.3219 acc 0.8922 | val loss 0.3106 acc 0.9003 f1 0.9042 auc 0.9676 | 496s
+  -> saved new best model (val F1 0.9042)
+Epoch 06/8 | train loss 0.2889 acc 0.9117 | val loss 0.2963 acc 0.9089 f1 0.9133 auc 0.9748 | 477s
+  -> saved new best model (val F1 0.9133)
+Epoch 07/8 | train loss 0.2679 acc 0.9259 | val loss 0.2976 acc 0.9111 f1 0.9153 auc 0.9761 | 491s
+  -> saved new best model (val F1 0.9153)
+Epoch 08/8 | train loss 0.2607 acc 0.9299 | val loss 0.2871 acc 0.9111 f1 0.9146 auc 0.9758 | 492s
+[best epoch 7] test results:
+              precision    recall  f1-score   support
+        REAL     0.9458    0.8756    0.9093      1575
+        FAKE     0.8842    0.9498    0.9158      1575
+    accuracy                         0.9127      3150
+   macro avg     0.9150    0.9127    0.9126      3150
+weighted avg     0.9150    0.9127    0.9126      3150
+ROC-AUC: 0.9762
+[done] artifacts in /home/user/EYE-FOR-AI/outputs/runs/efficientnet_b0-20261001-055332
+[done] deployable checkpoint: /home/user/EYE-FOR-AI/models/efficientnet_b0_best.pt

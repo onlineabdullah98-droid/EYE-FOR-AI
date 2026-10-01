@@ -49,8 +49,17 @@ class AnalysisResult:
         }
 
 
+def _val_f1(path: Path) -> float:
+    try:
+        return float(torch.load(str(path), map_location="cpu", weights_only=False, mmap=True)["val_metrics"]["f1"])
+    except Exception:
+        return -1.0
+
+
 def find_checkpoints(models_dir: str | Path = MODELS_DIR) -> list[Path]:
-    return sorted(Path(models_dir).glob("*.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    """Checkpoints in ``models_dir``, best validation F1 first (newest first on ties)."""
+    paths = sorted(Path(models_dir).glob("*.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(paths, key=_val_f1, reverse=True)
 
 
 class Predictor:

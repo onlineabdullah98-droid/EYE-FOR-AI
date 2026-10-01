@@ -42,7 +42,7 @@ def save_panel(result, out_path: Path) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("images", nargs="+")
-    p.add_argument("--checkpoint", default=None, help="Defaults to the newest file in models/")
+    p.add_argument("--checkpoint", default=None, help="Defaults to the best (validation F1) model in models/")
     p.add_argument("--threshold", type=float, default=0.5)
     p.add_argument("--out", default=str(OUTPUTS_DIR / "predictions"))
     a = p.parse_args()

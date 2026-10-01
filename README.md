@@ -19,6 +19,42 @@ Final Year Project (BSCS/BSAI/BSSE/BSCY). You upload an image and the system:
 
 ---
 
+## Trained models and results
+
+Two trained models are included in `models/`, so the app works right after cloning:
+
+| Model | Input | Test accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|---|
+| Custom CNN (baseline, from scratch) | 64 px | 81.9% | 80.6% | 84.1% | 0.823 | 0.908 |
+| **EfficientNet-B0 (transfer learning)** | 128 px | **91.3%** | 88.4% | 95.0% | **0.916** | **0.976** |
+
+Accuracy of EfficientNet-B0 on each dataset's part of the test set: CIFAKE 93.2% (1,784 images), 140k Faces 88.8% (1,366 images).
+
+**How these were trained:** on a 4-core CPU with no GPU, using 21,000 images. That is 6,000 per class from CIFAKE plus
+4,500 per class from 140k Faces, split 70/15/15 into 14,700 train, 3,150 validation and 3,150 test images.
+EfficientNet-B0 ran 8 epochs (2 frozen + 6 fine-tuning). The custom CNN ran 15 epochs. The test images were never
+used for training or model selection. Plots, metrics and full training logs are in `results/<model>/`.
+
+To reproduce:
+```bash
+python scripts/download_data.py --dataset cifake
+python scripts/download_data.py --dataset faces140k --max-shards 1 --max-per-class 1500
+python scripts/prepare_dataset.py --source data/raw/cifake data/raw/faces140k --max-per-class 6000
+python scripts/train.py --model efficientnet_b0 --img-size 128 --epochs 8 --freeze-epochs 2 --patience 3
+python scripts/train.py --model custom_cnn --img-size 64 --epochs 15 --batch-size 64 --patience 4
+```
+With a GPU you can train on more data at full resolution (`--img-size 224`), which should improve these numbers.
+
+| Analysis (FAKE) | Analysis (REAL) |
+|---|---|
+| ![fake](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) |
+| **Grad-CAM** | **Error Level Analysis** |
+| ![gradcam](docs/screenshots/gradcam.png) | ![ela](docs/screenshots/ela.png) |
+
+![Model performance tab](docs/screenshots/model_performance.png)
+
+---
+
 ## 1. Project structure
 
 ```
@@ -44,14 +80,16 @@ EYE-FOR-AI/
 │   ├── inference/predictor.py   # Predictor: classify + explain in one call
 │   └── db/history.py            # prediction history (SQLite / PostgreSQL)
 ├── scripts/
-│   ├── download_data.py         # download CIFAKE / 140k Faces / CASIA 2.0 from Kaggle
+│   ├── download_data.py         # download CIFAKE / 140k Faces (HuggingFace) / CASIA 2.0 (Kaggle)
 │   ├── prepare_dataset.py       # stratified train/val/test CSV manifests
 │   ├── train.py                 # train any model
 │   ├── evaluate.py              # evaluate a saved checkpoint
 │   └── predict.py               # CLI inference + saved analysis panel
 ├── tests/                       # pytest suite (runs on a synthetic mini-dataset)
+├── results/                     # metrics, plots and logs of the included trained models
+├── docs/screenshots/            # app screenshots
 ├── data/                        # datasets (git-ignored)
-├── models/                      # trained checkpoints *.pt (git-ignored)
+├── models/                      # trained checkpoints *.pt (the two included models are tracked)
 └── outputs/                     # training runs, plots, predictions, history DB (git-ignored)
 ```
 
@@ -77,23 +115,26 @@ Python 3.10 or newer is required.
 
 ## 3. Datasets
 
-| Dataset | Content | Detects | Kaggle id |
+| Dataset | Content | Detects | Download |
 |---|---|---|---|
-| **CIFAKE** (recommended start) | 60k real (CIFAR-10) + 60k Stable Diffusion images, 32×32 | AI-generated images | `birdy654/cifake-real-and-ai-generated-synthetic-images` |
-| **140k Real & Fake Faces** | 70k FFHQ + 70k StyleGAN faces, 256×256 | GAN / deepfake faces | `xhlulu/140k-real-and-fake-faces` |
-| **CASIA v2.0** | 7.4k authentic (`Au`) + 5.1k tampered (`Tp`) | Splicing / copy-move edits | `divg07/casia-20-image-tamperingdetection-dataset` |
+| **CIFAKE** (recommended start) | 60k real (CIFAR-10) + 60k Stable Diffusion images, 32×32 | AI-generated images | HuggingFace (no account) or Kaggle |
+| **140k Real & Fake Faces** | 70k FFHQ + 70k StyleGAN faces, 256×256 | GAN / deepfake faces | HuggingFace (no account) or Kaggle |
+| **CASIA v2.0** | 7.4k authentic (`Au`) + 5.1k tampered (`Tp`) | Splicing / copy-move edits | Kaggle only |
 
-**Kaggle API setup (one time):** go to kaggle.com → *Settings* → *API* → *Create New Token*, then put
-`kaggle.json` in `~/.kaggle/` (Windows: `C:\Users\<you>\.kaggle\`).
+By default the images are downloaded from HuggingFace with no account needed, and labels are mapped by class
+**name** (CIFAKE on HuggingFace uses `0 = FAKE`, the opposite of this project's convention).
 
 ```bash
-python scripts/download_data.py --dataset cifake
-python scripts/prepare_dataset.py --source data/raw/cifake
-# faster experiments on a laptop:
-python scripts/prepare_dataset.py --source data/raw/cifake --max-per-class 10000
-# combine datasets (AI-generated + manipulated):
-python scripts/prepare_dataset.py --source data/raw/cifake data/raw/casia2 --max-per-class 8000
+python scripts/download_data.py --dataset cifake                                    # ~50 MB
+python scripts/download_data.py --dataset faces140k --max-shards 1 --max-per-class 1500   # ~1 GB download, 9k images kept
+python scripts/prepare_dataset.py --source data/raw/cifake data/raw/faces140k --max-per-class 6000
 ```
+`--max-per-class` in `prepare_dataset.py` caps each source separately, so a small dataset is not drowned out
+when you combine datasets.
+
+**CASIA (Kaggle only):** go to kaggle.com → *Settings* → *API* → *Create New Token*, put `kaggle.json` in
+`~/.kaggle/` (Windows: `C:\Users\<you>\.kaggle\`), then run
+`python scripts/download_data.py --dataset casia2 --source kaggle`.
 
 You can also download a dataset manually and unzip it into `data/raw/<name>`. Any folder layout works as long as
 images sit under folders named `real`/`fake` or `Au`/`Tp` (case-insensitive). `prepare_dataset.py` writes
@@ -142,10 +183,9 @@ below) or prepare a smaller split with `--max-per-class`.
 !git clone <your-repo-url> EYE-FOR-AI
 %cd EYE-FOR-AI
 !pip install -q -r requirements.txt
-# upload kaggle.json, then:
-!mkdir -p ~/.kaggle && cp kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
 !python scripts/download_data.py --dataset cifake
-!python scripts/prepare_dataset.py --source data/raw/cifake --max-per-class 20000
+!python scripts/download_data.py --dataset faces140k --max-shards 2 --max-per-class 5000
+!python scripts/prepare_dataset.py --source data/raw/cifake data/raw/faces140k --max-per-class 20000
 !python scripts/train.py --model efficientnet_b0 --epochs 10 --batch-size 64 --num-workers 2
 # download models/efficientnet_b0_best.pt and put it in models/ on your laptop
 ```
@@ -187,7 +227,7 @@ streamlit run app.py        # opens http://localhost:8501
 - Sidebar settings: model checkpoint, decision threshold, Grad-CAM target, heatmap opacity, region sensitivity, ELA quality
 - **History** tab (stored in the database), **Model Performance** tab (metrics and training plots), downloadable JSON report
 
-If no model has been trained yet, the app still runs and shows ELA only.
+The app picks the checkpoint with the best validation F1 by default. If `models/` is empty, it still runs and shows ELA only.
 
 ## 7. REST API (Flask)
 
