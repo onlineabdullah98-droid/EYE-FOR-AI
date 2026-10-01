@@ -39,6 +39,7 @@ class AnalysisResult:
     def summary(self) -> dict:
         return {
             "label": self.label,
+            "ai_probability_percent": round(self.prob_fake * 100, 1),
             "confidence": round(self.confidence, 4),
             "prob_fake": round(self.prob_fake, 4),
             "prob_real": round(self.prob_real, 4),

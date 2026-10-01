@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-from eyeforai.config import OUTPUTS_DIR
+from eyeforai.config import OUTPUTS_DIR, PROJECT_ROOT
 from eyeforai.db import HistoryStore
 from eyeforai.explain import error_level_analysis
 from eyeforai.inference import Predictor, find_checkpoints
@@ -32,6 +32,12 @@ CSS = """
 .verdict.real {background: linear-gradient(135deg, #047857, #10b981);}
 .verdict .label {font-size: 2.4rem; font-weight: 800; letter-spacing: 2px;}
 .verdict .conf {font-size: 1.15rem; opacity: .95;}
+.verdict .pct {font-size: 3.2rem; font-weight: 800; line-height: 1.1; margin-top: .3rem;}
+.meter {position: relative; height: 18px; border-radius: 9px; margin: .5rem 0 .3rem;
+        background: linear-gradient(90deg, #10b981 0%, #facc15 50%, #ef4444 100%);}
+.meter .pin {position: absolute; top: -6px; width: 6px; height: 30px; margin-left: -3px; border-radius: 3px;
+             background: #111827; box-shadow: 0 0 0 2px #fff;}
+.meter-scale {display: flex; justify-content: space-between; font-size: .8rem; opacity: .75;}
 .card {border: 1px solid rgba(128,128,128,.25); border-radius: 14px; padding: .9rem 1.1rem; margin-bottom: .7rem;}
 .bar-wrap {background: rgba(128,128,128,.18); border-radius: 8px; height: 14px; overflow: hidden; margin: .25rem 0 .6rem;}
 .bar {height: 100%; border-radius: 8px;}
@@ -61,7 +67,27 @@ def prob_bar(label: str, value: float, color: str) -> str:
             f"<div class='bar-wrap'><div class='bar' style='width:{value*100:.1f}%;background:{color}'></div></div>")
 
 
-def latest_run_dir(model_name: str) -> Path | None:
+def verdict_text(prob_ai: float, threshold: float) -> str:
+    if prob_ai >= max(threshold, 0.85):
+        return "Very likely AI-generated / manipulated"
+    if prob_ai >= threshold:
+        return "Likely AI-generated / manipulated"
+    if prob_ai <= min(threshold, 0.15):
+        return "Very likely a real photo"
+    return "Likely a real photo"
+
+
+def ai_meter(prob_ai: float) -> str:
+    return (f"<div><b>AI likelihood</b> <span style='float:right'><b>{prob_ai:.1%}</b></span></div>"
+            f"<div class='meter'><div class='pin' style='left:{prob_ai*100:.1f}%'></div></div>"
+            "<div class='meter-scale'><span>Real</span><span>Uncertain</span><span>AI</span></div>")
+
+
+def results_dir(checkpoint: Path, model_name: str) -> Path | None:
+    """Plots for a checkpoint: results/<checkpoint name> (shipped with the repo), else the latest local run."""
+    shipped = PROJECT_ROOT / "results" / checkpoint.stem
+    if shipped.is_dir():
+        return shipped
     runs = sorted((OUTPUTS_DIR / "runs").glob(f"{model_name}-*"), key=lambda p: p.stat().st_mtime, reverse=True)
     return runs[0] if runs else None
 
@@ -84,8 +110,8 @@ with st.sidebar:
                  "until then only ELA analysis is available.")
 
     st.markdown("### Detection")
-    threshold = st.slider("FAKE decision threshold", 0.05, 0.95, 0.50, 0.05,
-                          help="Image is labelled FAKE when P(fake) ≥ threshold.")
+    threshold = st.slider("AI decision threshold", 0.05, 0.95, 0.50, 0.05,
+                          help="The image is labelled AI-generated when its AI likelihood ≥ this threshold.")
     st.markdown("### Explainability")
     cam_target = st.radio("Grad-CAM explains", ["fake", "predicted"], horizontal=True,
                           format_func=lambda v: "FAKE evidence" if v == "fake" else "Predicted class")
@@ -142,10 +168,12 @@ with tab_analyze:
 
         with col_res:
             kind = "fake" if result.is_fake else "real"
-            icon = "⚠️" if result.is_fake else "✅"
-            st.markdown(f"<div class='verdict {kind}'><div class='label'>{icon} {result.label}</div>"
-                        f"<div class='conf'>{result.confidence:.1%} confidence</div></div>", unsafe_allow_html=True)
-            st.markdown("<div class='card'>" + prob_bar("Fake / manipulated", result.prob_fake, "#ef4444")
+            title = "🤖 AI-GENERATED" if result.is_fake else "✅ REAL PHOTO"
+            st.markdown(f"<div class='verdict {kind}'><div class='label'>{title}</div>"
+                        f"<div class='pct'>{result.prob_fake:.0%} AI</div>"
+                        f"<div class='conf'>{verdict_text(result.prob_fake, threshold)}</div></div>",
+                        unsafe_allow_html=True)
+            st.markdown("<div class='card'>" + ai_meter(result.prob_fake)
                         + prob_bar("Real / authentic", result.prob_real, "#10b981") + "</div>",
                         unsafe_allow_html=True)
             c1, c2, c3 = st.columns(3)
@@ -200,7 +228,7 @@ with tab_history:
 
 # ---------- model performance ----------
 with tab_perf:
-    run = latest_run_dir(predictor.model_name) if predictor else None
+    run = results_dir(ckpt, predictor.model_name) if predictor else None
     if run is None:
         st.info("Training plots appear here after running `scripts/train.py`.")
     else:
@@ -219,6 +247,10 @@ with tab_perf:
             img = next(iter(run.glob(pattern)), None)
             if img:
                 col.image(str(img))
+        breakdown = run / "per_dataset_and_generator.txt"
+        if breakdown.exists():
+            with st.expander("Accuracy per dataset and per AI generator"):
+                st.code(breakdown.read_text(), language=None)
 
 # ---------- about ----------
 with tab_about:

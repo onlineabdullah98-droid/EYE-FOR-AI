@@ -1,0 +1,29 @@
+== per dataset (accuracy / AUC)
+dataset          n  v1 acc  v2 acc  v1 auc  v2 auc
+ALL           3750   0.623   0.889   0.673   0.956
+cifake         582   0.950   0.912   0.994   0.995
+faces140k      610   0.949   0.918   0.985   0.989
+genimage      1048   0.521   0.792   0.587   0.897
+openfake      1510   0.436   0.935   0.380   0.977
+== per generator: share of images labelled correctly (FAKE caught / REAL kept)
+ADM                    FAKE n=  75  v1 20%  v2 21%
+BigGAN                 FAKE n=  84  v1 32%  v2 81%
+GLIDE                  FAKE n=  78  v1 19%  v2 77%
+Midjourney             FAKE n=  72  v1 19%  v2 76%
+Real                   REAL n= 504  v1 79%  v2 92%
+SD15                   FAKE n=  89  v1 33%  v2 83%
+VQDM                   FAKE n=  79  v1 29%  v2 52%
+Wukong                 FAKE n=  67  v1 37%  v2 76%
+docci                  REAL n= 249  v1 77%  v2 90%
+ernie-image-turbo      FAKE n=  11  v1 9%  v2 91%
+flux.2-klein-9b        FAKE n= 147  v1 11%  v2 94%
+gpt-image-1.5          FAKE n=  99  v1 14%  v2 93%
+gpt-image-2            FAKE n=  12  v1 8%  v2 75%
+illustrious            FAKE n= 110  v1 8%  v2 97%
+imagenet               REAL n= 495  v1 71%  v2 98%
+midjourney-7           FAKE n=  63  v1 24%  v2 84%
+recraft-v3             FAKE n=  12  v1 8%  v2 50%
+sora-2                 FAKE n=   9  v1 11%  v2 89%
+veo-3                  FAKE n=  30  v1 7%  v2 87%
+wan-video-2.5          FAKE n=  24  v1 17%  v2 100%
+z-image-turbo          FAKE n= 212  v1 19%  v2 96%

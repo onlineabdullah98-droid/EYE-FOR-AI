@@ -2,8 +2,8 @@
 
 Final Year Project (BSCS/BSAI/BSSE/BSCY). You upload an image and the system:
 
-1. classifies it as **REAL** or **FAKE** (AI-generated or manipulated),
-2. reports a **confidence score** (e.g. *94.5% FAKE*),
+1. tells you whether it is a **real photo** or **AI-generated / manipulated**,
+2. reports **how likely it is AI**, as a percentage with a meter (e.g. *98% AI*),
 3. explains the decision with a **Grad-CAM heatmap**, **suspicious-region boxes**, and **Error Level Analysis (ELA)**,
 4. stores every prediction in a **history database** (SQLite by default, PostgreSQL optional).
 
@@ -34,34 +34,73 @@ press Ctrl+C.
 
 ## Trained models and results
 
-Two trained models are included in `models/`, so the app works right after cloning:
+The app uses **`models/efficientnet_b0_v2.pt`**, which is trained on modern AI generators. Older models are kept in
+`models/archive/` for comparison.
+
+### v2: modern AI generators (default model)
+
+The first model (v1) only saw CIFAKE and StyleGAN faces. On images from current generators it said REAL almost
+every time: only 12% of OpenFake AI images were caught. v2 continues training from v1 on four datasets.
+
+| Data used for v2 | Images | Generators |
+|---|---|---|
+| OpenFake (2 shards) | 10,000 | GPT-Image 1.5/2, Midjourney 7, Flux.2, Nano Banana Pro, Sora-2, Veo-3, Seedream, Recraft, Ideogram, Z-Image... vs real ImageNet/DOCCI photos |
+| Tiny-GenImage (4 shards) | 7,000 | Midjourney, SD 1.5, ADM, GLIDE, BigGAN, VQDM, Wukong vs real ImageNet photos |
+| CIFAKE | 4,000 | Stable Diffusion 1.4 vs CIFAR-10 |
+| 140k Faces | 4,000 | StyleGAN faces vs FFHQ |
+
+That is 25,000 images, split 70/15/15 into 17,500 train, 3,750 validation and 3,750 test images. Training used
+EfficientNet-B0 at 160 px for 6 epochs on a 4-core CPU.
+
+**Test set results (3,750 images never used for training):**
+
+| Test data | v1 accuracy | **v2 accuracy** | v1 ROC-AUC | **v2 ROC-AUC** |
+|---|---|---|---|---|
+| All | 62.3% | **88.9%** | 0.673 | **0.956** |
+| OpenFake (modern generators) | 43.6% | **93.5%** | 0.380 | **0.977** |
+| GenImage | 52.1% | **79.2%** | 0.587 | **0.897** |
+| CIFAKE | 95.0% | 91.2% | 0.994 | 0.995 |
+| 140k Faces | 94.9% | 91.8% | 0.985 | 0.989 |
+
+v2 overall: precision 90.7%, recall 86.6%, F1 0.886.
+
+Share of AI images caught, by generator (v1 → v2): GPT-Image-1.5 14% → 93%, Midjourney-7 24% → 84%,
+Flux.2 11% → 94%, Veo-3 7% → 87%, Midjourney (GenImage) 19% → 76%, SD 1.5 33% → 83%. Real photos correctly
+kept: 98% of ImageNet and 90% of DOCCI. Weak spots: ADM (21%), VQDM (52%) and Recraft-v3 (50%, only 12 test images).
+The full table is in `results/efficientnet_b0_v2/per_dataset_and_generator.txt` and in the app's
+*Model Performance* tab.
+
+Notes for the report:
+- v1 had been trained on part of CIFAKE and 140k Faces, so its v1 numbers on those two rows are optimistic.
+  OpenFake and GenImage are clean comparisons, because neither model saw those test images.
+- In GenImage every real image is a JPEG and every AI image is a PNG. Without a fix, a model learns "PNG = AI".
+  `download_data.py` therefore re-encodes both classes the same way (max 512 px, random JPEG quality 70–98 or PNG).
+
+To reproduce v2:
+```bash
+python scripts/download_data.py --dataset openfake --splits test --max-shards 2    # ~10 GB download
+python scripts/download_data.py --dataset genimage --splits train --max-shards 4   # ~1.9 GB download
+python scripts/prepare_dataset.py --out data/splits_v2 --source data/raw/openfake@5000 data/raw/genimage@3500 \
+    data/raw/cifake@2000 data/raw/faces140k@2000
+python scripts/train.py --model efficientnet_b0 --splits-dir data/splits_v2 --init-from models/archive/efficientnet_b0_v1.pt \
+    --img-size 160 --epochs 6 --freeze-epochs 0 --lr 5e-4 --out-name efficientnet_b0_v2.pt
+```
+
+### v1: baseline comparison (CIFAKE + 140k Faces only)
 
 | Model | Input | Test accuracy | Precision | Recall | F1 | ROC-AUC |
 |---|---|---|---|---|---|---|
-| Custom CNN (baseline, from scratch) | 64 px | 81.9% | 80.6% | 84.1% | 0.823 | 0.908 |
-| **EfficientNet-B0 (transfer learning)** | 128 px | **91.3%** | 88.4% | 95.0% | **0.916** | **0.976** |
+| Custom CNN (from scratch) | 64 px | 81.9% | 80.6% | 84.1% | 0.823 | 0.908 |
+| EfficientNet-B0 (transfer learning) | 128 px | 91.3% | 88.4% | 95.0% | 0.916 | 0.976 |
 
-Accuracy of EfficientNet-B0 on each dataset's part of the test set: CIFAKE 93.2% (1,784 images), 140k Faces 88.8% (1,366 images).
+These were trained on 21,000 CIFAKE and 140k Faces images (14,700 train / 3,150 val / 3,150 test). The comparison
+shows that transfer learning beats a CNN trained from scratch by about 9 points on the same data. Plots and logs are
+in `results/custom_cnn_v1/` and `results/efficientnet_b0_v1/`.
 
-**How these were trained:** on a 4-core CPU with no GPU, using 21,000 images. That is 6,000 per class from CIFAKE plus
-4,500 per class from 140k Faces, split 70/15/15 into 14,700 train, 3,150 validation and 3,150 test images.
-EfficientNet-B0 ran 8 epochs (2 frozen + 6 fine-tuning). The custom CNN ran 15 epochs. The test images were never
-used for training or model selection. Plots, metrics and full training logs are in `results/<model>/`.
-
-To reproduce:
-```bash
-python scripts/download_data.py --dataset cifake
-python scripts/download_data.py --dataset faces140k --max-shards 1 --max-per-class 1500
-python scripts/prepare_dataset.py --source data/raw/cifake data/raw/faces140k --max-per-class 6000
-python scripts/train.py --model efficientnet_b0 --img-size 128 --epochs 8 --freeze-epochs 2 --patience 3
-python scripts/train.py --model custom_cnn --img-size 64 --epochs 15 --batch-size 64 --patience 4
-```
-With a GPU you can train on more data at full resolution (`--img-size 224`), which should improve these numbers.
-
-| Analysis (FAKE) | Analysis (REAL) |
+| AI image (Midjourney 7) | Real photo |
 |---|---|
-| ![fake](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) |
-| **Grad-CAM** | **Error Level Analysis** |
+| ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) |
+| **Grad-CAM** (v1 model, StyleGAN face) | **Error Level Analysis** |
 | ![gradcam](docs/screenshots/gradcam.png) | ![ela](docs/screenshots/ela.png) |
 
 ![Model performance tab](docs/screenshots/model_performance.png)
@@ -94,7 +133,7 @@ EYE-FOR-AI/
 │   ├── inference/predictor.py   # Predictor: classify + explain in one call
 │   └── db/history.py            # prediction history (SQLite / PostgreSQL)
 ├── scripts/
-│   ├── download_data.py         # download CIFAKE / 140k Faces (HuggingFace) / CASIA 2.0 (Kaggle)
+│   ├── download_data.py         # CIFAKE / 140k Faces / GenImage / OpenFake (HuggingFace), CASIA (Kaggle)
 │   ├── prepare_dataset.py       # stratified train/val/test CSV manifests
 │   ├── train.py                 # train any model
 │   ├── evaluate.py              # evaluate a saved checkpoint
@@ -103,7 +142,7 @@ EYE-FOR-AI/
 ├── results/                     # metrics, plots and logs of the included trained models
 ├── docs/screenshots/            # app screenshots
 ├── data/                        # datasets (git-ignored)
-├── models/                      # trained checkpoints *.pt (the two included models are tracked)
+├── models/                      # efficientnet_b0_v2.pt (used by the app) + archive/ with v1 models
 └── outputs/                     # training runs, plots, predictions, history DB (git-ignored)
 ```
 
@@ -133,7 +172,13 @@ Python 3.10 or newer is required.
 |---|---|---|---|
 | **CIFAKE** (recommended start) | 60k real (CIFAR-10) + 60k Stable Diffusion images, 32×32 | AI-generated images | HuggingFace (no account) or Kaggle |
 | **140k Real & Fake Faces** | 70k FFHQ + 70k StyleGAN faces, 256×256 | GAN / deepfake faces | HuggingFace (no account) or Kaggle |
+| **OpenFake** | Real LAION/ImageNet/DOCCI photos vs 2025–26 generators (GPT-Image, MJ 7, Flux.2, Sora...) | Modern AI images | HuggingFace, ~5 GB per shard |
+| **Tiny-GenImage** | ImageNet photos vs Midjourney, SD, ADM, GLIDE, BigGAN, VQDM, Wukong | AI images | HuggingFace, ~475 MB per shard |
 | **CASIA v2.0** | 7.4k authentic (`Au`) + 5.1k tampered (`Tp`) | Splicing / copy-move edits | Kaggle only |
+
+OpenFake (CC BY-NC 4.0) and Tiny-GenImage (CC BY-NC-SA 4.0) are licensed for non-commercial use, which covers an
+academic project. For these two datasets, images are downscaled to at most 512 px and both classes are re-encoded
+the same way. The generator's name is kept in each file name, for example `midjourney-7_000123.jpg`.
 
 By default the images are downloaded from HuggingFace with no account needed, and labels are mapped by class
 **name** (CIFAKE on HuggingFace uses `0 = FAKE`, the opposite of this project's convention).
@@ -186,7 +231,7 @@ The best checkpoint is also copied to `models/<model>_best.pt`, which the app an
 
 To re-evaluate a checkpoint later:
 ```bash
-python scripts/evaluate.py --checkpoint models/efficientnet_b0_best.pt --split test
+python scripts/evaluate.py --checkpoint models/efficientnet_b0_v2.pt --split test
 ```
 
 **Compute:** training transfer models on the full CIFAKE set is slow on a CPU. Use a GPU (for example Google Colab,
@@ -209,7 +254,7 @@ below) or prepare a smaller split with `--max-per-class`.
 ## 5. Inference and explainability (FYP-2)
 
 ```bash
-python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_best.pt
+python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v2.pt
 ```
 This prints a JSON result and saves `outputs/predictions/<folder>_<name>_analysis.png`, a four-panel image:
 Original · Grad-CAM · Suspicious regions · ELA.
@@ -217,7 +262,7 @@ Original · Grad-CAM · Suspicious regions · ELA.
 From Python:
 ```python
 from eyeforai.inference import Predictor
-p = Predictor("models/efficientnet_b0_best.pt")
+p = Predictor("models/efficientnet_b0_v2.pt")
 r = p.analyze("photo.jpg")
 print(r.label, f"{r.confidence:.1%}")      # FAKE 94.5%
 r.gradcam_overlay, r.regions_overlay, r.ela.heatmap   # RGB numpy arrays
@@ -285,6 +330,8 @@ test cross-dataset generalisation (train on CIFAKE, evaluate on CASIA with `eval
 
 - A model only knows the kinds of fakes it was trained on. New generators, heavy compression, or screenshots
   reduce accuracy. Present results as decision support, not proof.
-- CIFAKE images are 32×32. A model trained only on CIFAKE will not generalise well to high-resolution photos.
-  Combine datasets for a stronger demo.
+- The v2 model is about 89% accurate overall, so roughly 1 in 10 images will be judged wrong. It is weakest on
+  ADM, VQDM and Recraft images and on edited (rather than fully generated) photos. Screenshots, heavy filters and
+  images shrunk very small also reduce accuracy.
+- Training was done on a CPU at 160 px. Training on a GPU with more OpenFake shards at 224 px should improve results.
 - ELA is not meaningful on PNGs or images that have been re-compressed many times.

@@ -5,6 +5,7 @@ Examples:
   python scripts/train.py --model efficientnet_b0 --epochs 15 --freeze-epochs 3
   python scripts/train.py --model resnet50 --batch-size 16
   python scripts/train.py --model efficientnet_b2 --class-weights      # imbalanced data (CASIA)
+  python scripts/train.py --model efficientnet_b0 --init-from models/efficientnet_b0_v2.pt --freeze-epochs 0
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ def main() -> None:
     p.add_argument("--no-augment", action="store_true")
     p.add_argument("--no-amp", action="store_true")
     p.add_argument("--class-weights", action="store_true")
+    p.add_argument("--init-from", default=None, help="Continue training from an existing checkpoint (.pt)")
+    p.add_argument("--out-name", default=None, help="File name in models/ (default: <model>_best.pt)")
     a = p.parse_args()
 
     cfg = TrainConfig(
@@ -46,6 +49,7 @@ def main() -> None:
         weight_decay=a.weight_decay, label_smoothing=a.label_smoothing, patience=a.patience,
         num_workers=a.num_workers, seed=a.seed, device=a.device, pretrained=not a.no_pretrained,
         augment=not a.no_augment, amp=not a.no_amp, class_weights=a.class_weights,
+        init_from=a.init_from, out_name=a.out_name,
     )
     fit(cfg)
 

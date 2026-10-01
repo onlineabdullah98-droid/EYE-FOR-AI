@@ -109,3 +109,30 @@ def test_hf_parquet_labels_mapped_by_name(tmp_path):
     _extract_parquet(tmp_path / "train.parquet", "train", tmp_path / "out", Counter(), None)
     labels = Counter(label for _, label in scan_directory(tmp_path / "out"))
     assert labels == {FAKE_LABEL: 1, REAL_LABEL: 2}
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("real", "REAL"), ("RealArt", "REAL"), ("human", "REAL"), ("FAKE", "FAKE"), ("ai_gen", "FAKE"), ("AiArtData", "FAKE"),
+])
+def test_canonical_label(name, expected):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from download_data import canonical_label
+
+    assert canonical_label(name) == expected
+
+
+def test_normalize_image_same_policy_for_any_input_format():
+    """PNG and JPEG inputs both come out downscaled and re-encoded, so file format cannot leak the label."""
+    import random
+
+    import cv2
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from download_data import normalize_image
+
+    img = np.random.randint(0, 255, (800, 600, 3), dtype=np.uint8)
+    for ext in (".png", ".jpg"):
+        data = cv2.imencode(ext, img)[1].tobytes()
+        out, out_ext = normalize_image(data, random.Random(0))
+        decoded = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR)
+        assert out_ext in (".jpg", ".png") and max(decoded.shape[:2]) == 512

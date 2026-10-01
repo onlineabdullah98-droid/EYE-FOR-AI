@@ -12,6 +12,8 @@ Two sources:
 Usage:
   python scripts/download_data.py --dataset cifake
   python scripts/download_data.py --dataset faces140k --max-shards 1 --max-per-class 3000
+  python scripts/download_data.py --dataset genimage --splits train --max-shards 4
+  python scripts/download_data.py --dataset openfake --splits test --max-shards 1 --max-per-class 3000
   python scripts/download_data.py --dataset casia2 --source kaggle
 """
 
@@ -19,23 +21,46 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
+
+import cv2
+import numpy as np
 
 import _bootstrap  # noqa: F401
 
 from eyeforai.config import RAW_DATA_DIR
 
+@dataclass(frozen=True)
+class HFDataset:
+    repo: str
+    data_dir: str = "data"
+    # Re-encode both classes with the same random JPEG/PNG policy. Needed when real and fake images come in
+    # different file formats (GenImage: every real is JPEG, every fake is PNG), otherwise the model learns
+    # "PNG = fake" instead of learning what AI images look like.
+    normalize_format: bool = False
+
+
 HF_DATASETS = {
     # 60k real (CIFAR-10) + 60k Stable Diffusion fakes, 32x32. Best starting point for AI-generated detection.
-    "cifake": "dragonintelligence/CIFAKE-image-dataset",
+    "cifake": HFDataset("dragonintelligence/CIFAKE-image-dataset"),
     # 70k real (FFHQ) + 70k StyleGAN faces, 256x256. GAN / deepfake face detection.
-    "faces140k": "TheKernel01/140k-Real-and-Fake-Faces",
+    "faces140k": HFDataset("TheKernel01/140k-Real-and-Fake-Faces"),
+    # ImageNet photos vs Midjourney, SD 1.4/1.5, ADM, GLIDE, BigGAN, VQDM, Wukong (35k images, ~8 GB).
+    "genimage": HFDataset("TheKernel01/Tiny-GenImage", normalize_format=True),
+    # LAION photos vs modern generators: Flux, SD 3.5, Midjourney v6, DALL-E 3, GPT-Image, Imagen... (~5 GB/shard).
+    "openfake": HFDataset("ComplexDataLab/OpenFake", data_dir="core", normalize_format=True),
 }
+
+REAL_NAMES = ("real", "human", "authentic")
+FAKE_NAMES = ("fake", "ai", "gen", "synthetic")
 
 KAGGLE_DATASETS = {
     "cifake": "birdy654/cifake-real-and-ai-generated-synthetic-images",
@@ -59,41 +84,104 @@ def _image_ext(data: bytes, path: str | None) -> str:
     return ".png"
 
 
-def _download(url: str, dest: Path) -> None:
+def _download(url: str, dest: Path, retries: int = 4) -> None:
+    """Download with resume: large shards (5 GB) often get cut off mid-transfer."""
     print(f"  downloading {url.rsplit('/', 1)[-1]} ...", flush=True)
     tmp = dest.with_suffix(".part")
-    with urllib.request.urlopen(url) as resp, tmp.open("wb") as f:
-        shutil.copyfileobj(resp, f, length=1 << 20)
-    tmp.rename(dest)
+    for attempt in range(retries + 1):
+        done = tmp.stat().st_size if tmp.exists() else 0
+        req = urllib.request.Request(url, headers={"Range": f"bytes={done}-"} if done else {})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                if done and resp.status != 206:  # server ignored the range: start over
+                    done = 0
+                total = done + int(resp.headers.get("Content-Length", 0))
+                with tmp.open("ab" if done else "wb") as f:
+                    shutil.copyfileobj(resp, f, length=1 << 20)
+            if tmp.stat().st_size >= total:
+                tmp.rename(dest)
+                return
+        except OSError as e:
+            print(f"    interrupted ({e})", flush=True)
+        if attempt < retries:
+            time.sleep(2 ** (attempt + 1))
+            print(f"    resuming (attempt {attempt + 2})...", flush=True)
+    raise RuntimeError(f"Download of {url} did not complete after {retries + 1} attempts")
 
 
-def _extract_parquet(parquet_path: Path, split: str, out_root: Path, counts: Counter, max_per_class: int | None) -> None:
+def canonical_label(name: str) -> str:
+    """Map a dataset's class name ('real', 'RealArt', 'ai_gen', 'FAKE', ...) to REAL or FAKE."""
+    n = name.lower()
+    if any(k in n for k in REAL_NAMES):
+        return "REAL"
+    if any(k in n for k in FAKE_NAMES):
+        return "FAKE"
+    raise ValueError(f"Cannot tell whether class '{name}' is real or fake")
+
+
+def normalize_image(data: bytes, rng: random.Random, max_side: int = 512) -> tuple[bytes, str] | None:
+    """Downscale to ``max_side`` and re-encode: 80% JPEG (quality 70-98), 20% PNG, the same for both classes."""
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    if max(h, w) > max_side:
+        scale = max_side / max(h, w)
+        img = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    if rng.random() < 0.8:
+        ok, enc = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, rng.randint(70, 98)])
+        ext = ".jpg"
+    else:
+        ok, enc = cv2.imencode(".png", img)
+        ext = ".png"
+    return (enc.tobytes(), ext) if ok else None
+
+
+def _extract_parquet(parquet_path: Path, split: str, out_root: Path, counts: Counter, max_per_class: int | None,
+                     normalize: bool = False, seed: int = 0) -> None:
     import pyarrow.parquet as pq
 
+    rng = random.Random(f"{seed}-{parquet_path.name}")
     pf = pq.ParquetFile(parquet_path)
-    meta = json.loads(pf.schema_arrow.metadata[b"huggingface"])
-    # Map label ids by NAME: datasets disagree on whether 0 means REAL or FAKE.
-    names = [n.upper() for n in meta["info"]["features"]["label"]["names"]]
-    for batch in pf.iter_batches(batch_size=1000, columns=["image", "label"]):
-        for img, label in zip(batch.column("image").to_pylist(), batch.column("label").to_pylist()):
-            name = names[label]
+    features = json.loads(pf.schema_arrow.metadata[b"huggingface"])["info"]["features"]
+    # Map labels by NAME: datasets disagree on whether 0 means REAL or FAKE, and some store strings.
+    label_names = features["label"].get("names")
+    gen_col = next((c for c in ("generator", "model") if c in features), None)
+    gen_names = features[gen_col].get("names") if gen_col else None
+    columns = ["image", "label"] + ([gen_col] if gen_col else [])
+
+    for batch in pf.iter_batches(batch_size=200, columns=columns):
+        gens = batch.column(gen_col).to_pylist() if gen_col else [None] * batch.num_rows
+        for img, label, gen in zip(batch.column("image").to_pylist(), batch.column("label").to_pylist(), gens):
+            name = canonical_label(label_names[label] if label_names else str(label))
             if max_per_class and counts[(split, name)] >= max_per_class:
                 continue
-            data = img["bytes"]
+            data, ext = img["bytes"], _image_ext(img["bytes"], img.get("path"))
+            if normalize:
+                converted = normalize_image(data, rng)
+                if converted is None:
+                    continue
+                data, ext = converted
+            source = gen_names[gen] if (gen_names and gen is not None) else gen
+            # Keep the generator in the file name so results can be broken down per generator later.
+            prefix = f"{str(source).replace('/', '-').replace(' ', '-')}_" if source else ""
             out_dir = out_root / split / name
             out_dir.mkdir(parents=True, exist_ok=True)
-            (out_dir / f"{counts[(split, name)]:06d}{_image_ext(data, img.get('path'))}").write_bytes(data)
+            (out_dir / f"{prefix}{counts[(split, name)]:06d}{ext}").write_bytes(data)
             counts[(split, name)] += 1
 
 
-def download_hf(dataset: str, target: Path, max_shards: int | None, max_per_class: int | None) -> None:
-    repo = HF_DATASETS[dataset]
-    with urllib.request.urlopen(f"{HF_BASE}/api/datasets/{repo}/tree/main/data") as resp:
+def download_hf(dataset: str, target: Path, max_shards: int | None, max_per_class: int | None,
+                splits: list[str] | None = None, keep_parquet: bool = False) -> None:
+    spec = HF_DATASETS[dataset]
+    with urllib.request.urlopen(f"{HF_BASE}/api/datasets/{spec.repo}/tree/main/{spec.data_dir}") as resp:
         files = sorted(f["path"] for f in json.load(resp) if f["path"].endswith(".parquet"))
 
     by_split: dict[str, list[str]] = {}
     for f in files:
         by_split.setdefault(Path(f).name.split("-")[0], []).append(f)
+    if splits:
+        by_split = {k: v for k, v in by_split.items() if k in splits}
 
     cache = target / "_parquet"
     cache.mkdir(parents=True, exist_ok=True)
@@ -102,9 +190,10 @@ def download_hf(dataset: str, target: Path, max_shards: int | None, max_per_clas
         for shard in shards[:max_shards] if max_shards else shards:
             local = cache / Path(shard).name
             if not local.exists():
-                _download(f"{HF_BASE}/datasets/{repo}/resolve/main/{shard}", local)
-            _extract_parquet(local, split, target, counts, max_per_class)
-    shutil.rmtree(cache)
+                _download(f"{HF_BASE}/datasets/{spec.repo}/resolve/main/{shard}", local)
+            _extract_parquet(local, split, target, counts, max_per_class, spec.normalize_format)
+    if not keep_parquet:
+        shutil.rmtree(cache)
     for (split, name), n in sorted(counts.items()):
         print(f"  {split:10s} {name:5s} {n:6d} images")
 
@@ -123,10 +212,12 @@ def download_kaggle(dataset: str, target: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", choices=sorted(KAGGLE_DATASETS), required=True)
+    parser.add_argument("--dataset", choices=sorted({*HF_DATASETS, *KAGGLE_DATASETS}), required=True)
     parser.add_argument("--source", choices=("huggingface", "kaggle"), default="huggingface")
     parser.add_argument("--max-shards", type=int, default=None, help="HuggingFace: parquet shards per split")
     parser.add_argument("--max-per-class", type=int, default=None, help="HuggingFace: images per class per split")
+    parser.add_argument("--splits", nargs="+", default=None, help="HuggingFace: only these splits, e.g. train test")
+    parser.add_argument("--keep-parquet", action="store_true", help="Keep downloaded parquet files")
     args = parser.parse_args()
 
     source = args.source
@@ -137,7 +228,7 @@ def main() -> None:
     target = RAW_DATA_DIR / args.dataset
     target.mkdir(parents=True, exist_ok=True)
     if source == "huggingface":
-        download_hf(args.dataset, target, args.max_shards, args.max_per_class)
+        download_hf(args.dataset, target, args.max_shards, args.max_per_class, args.splits, args.keep_parquet)
     else:
         download_kaggle(args.dataset, target)
     print(f"\nDone. Next step:\n  python scripts/prepare_dataset.py --source {target}")

@@ -42,6 +42,8 @@ class TrainConfig:
     augment: bool = True
     amp: bool = True
     device: str | None = None
+    init_from: str | None = None  # continue from an existing checkpoint of the same architecture
+    out_name: str | None = None   # file name in models/, default "<model>_best.pt"
     run_name: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d-%H%M%S"))
 
     def __post_init__(self) -> None:
@@ -123,7 +125,14 @@ def fit(cfg: TrainConfig) -> Path:
     print(f"[data] train={len(train_ds)} val={len(loaders['val'].dataset)} "
           f"test={len(loaders['test'].dataset) if 'test' in loaders else 0}")
 
-    model = build_model(cfg.model_name, num_classes=len(CLASS_NAMES), pretrained=cfg.pretrained).to(device)
+    model = build_model(cfg.model_name, num_classes=len(CLASS_NAMES), pretrained=cfg.pretrained and not cfg.init_from)
+    if cfg.init_from:
+        init = load_checkpoint(cfg.init_from)
+        if init["model_name"] != cfg.model_name:
+            raise ValueError(f"--init-from is a {init['model_name']} checkpoint, not {cfg.model_name}")
+        model.load_state_dict(init["state_dict"])
+        print(f"[init] weights loaded from {cfg.init_from}")
+    model = model.to(device)
     backbone_params, head_params = split_param_groups(model, cfg.model_name)
     optimizer = torch.optim.AdamW(
         [
@@ -196,7 +205,7 @@ def fit(cfg: TrainConfig) -> Path:
     print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    final_path = MODELS_DIR / f"{cfg.model_name}_best.pt"
+    final_path = MODELS_DIR / (cfg.out_name or f"{cfg.model_name}_best.pt")
     shutil.copy2(best_path, final_path)
     print(f"[done] artifacts in {run_dir}\n[done] deployable checkpoint: {final_path}")
     return final_path

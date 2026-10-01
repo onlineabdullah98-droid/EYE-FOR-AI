@@ -1,6 +1,6 @@
 """Run inference on one or more images and save a Grad-CAM + ELA report panel.
 
-  python scripts/predict.py path/to/image.jpg --checkpoint models/efficientnet_b0_best.pt
+  python scripts/predict.py path/to/image.jpg --checkpoint models/efficientnet_b0_v2.pt
 """
 
 from __future__ import annotations
