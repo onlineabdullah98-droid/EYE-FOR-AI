@@ -44,6 +44,21 @@ def compute_metrics(y_true: Sequence[int], prob_fake: Sequence[float], threshold
     return metrics
 
 
+def calibrate_thresholds(y_true: Sequence[int], prob_fake: Sequence[float], max_fpr: float = 0.05,
+                         max_fnr: float = 0.10) -> dict[str, float]:
+    """Pick the two cut-offs of the REAL / UNCERTAIN / AI verdict from validation predictions.
+
+    ``ai``: at most ``max_fpr`` of real images score at or above it (few false accusations).
+    ``real``: at most ``max_fnr`` of AI images score below it (few AI images waved through).
+    Scores in between are reported as UNCERTAIN. ``ai`` never goes below 0.5 and ``real`` never above it.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    prob_fake = np.asarray(prob_fake, dtype=float)
+    ai = float(np.quantile(prob_fake[y_true == 0], 1 - max_fpr)) if (y_true == 0).any() else 0.5
+    real = float(np.quantile(prob_fake[y_true == 1], max_fnr)) if (y_true == 1).any() else 0.5
+    return {"real": round(min(real, 0.5), 4), "ai": round(min(max(ai, 0.5), 0.99), 4)}
+
+
 def plot_history(history: dict[str, list[float]], out_path: str | Path) -> Path:
     """Side-by-side loss and accuracy curves for train vs validation."""
     epochs = range(1, len(history["train_loss"]) + 1)

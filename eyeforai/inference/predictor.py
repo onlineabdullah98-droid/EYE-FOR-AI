@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ..config import CLASS_NAMES, FAKE_LABEL, MODELS_DIR
+from ..config import CLASS_NAMES, FAKE_LABEL, MODELS_DIR, UNCERTAIN
 from ..data.transforms import EvalTransform
 from ..explain import GradCAM, cam_to_regions, draw_regions, error_level_analysis, overlay_heatmap
 from ..explain.ela import ELAResult
@@ -35,6 +35,10 @@ class AnalysisResult:
     @property
     def is_fake(self) -> bool:
         return self.label == CLASS_NAMES[FAKE_LABEL]
+
+    @property
+    def is_uncertain(self) -> bool:
+        return self.label == UNCERTAIN
 
     def summary(self) -> dict:
         return {
@@ -64,14 +68,21 @@ def find_checkpoints(models_dir: str | Path = MODELS_DIR) -> list[Path]:
 
 
 class Predictor:
-    def __init__(self, checkpoint_path: str | Path, device: str | None = None, threshold: float = 0.5):
+    def __init__(self, checkpoint_path: str | Path, device: str | None = None, threshold: float | None = None,
+                 real_threshold: float | None = None):
+        """``threshold``: AI likelihood at or above which the verdict is AI (FAKE).
+        ``real_threshold``: AI likelihood below which the verdict is REAL. In between: UNCERTAIN.
+        Both default to the values calibrated on validation data at training time (0.5 for older checkpoints).
+        """
         self.device = get_device(device)
         ckpt = load_checkpoint(checkpoint_path, self.device)
         self.model_name: str = ckpt["model_name"]
         self.img_size: int = ckpt["img_size"]
         self.class_names: list[str] = ckpt.get("class_names", list(CLASS_NAMES))
         self.val_metrics: dict = ckpt.get("val_metrics", {})
-        self.threshold = threshold
+        self.calibrated: dict = ckpt.get("thresholds", {"real": 0.5, "ai": 0.5})
+        self.threshold = self.calibrated["ai"] if threshold is None else threshold
+        self.real_threshold = self.calibrated["real"] if real_threshold is None else real_threshold
 
         self.model = build_model(self.model_name, num_classes=ckpt["num_classes"], pretrained=False)
         self.model.load_state_dict(ckpt["state_dict"])
@@ -85,7 +96,9 @@ class Predictor:
     def _make_label(self, prob_fake: float) -> tuple[str, float]:
         if prob_fake >= self.threshold:
             return self.class_names[FAKE_LABEL], prob_fake
-        return self.class_names[1 - FAKE_LABEL], 1.0 - prob_fake
+        if prob_fake < min(self.real_threshold, self.threshold):
+            return self.class_names[1 - FAKE_LABEL], 1.0 - prob_fake
+        return UNCERTAIN, max(prob_fake, 1.0 - prob_fake)
 
     @torch.inference_mode()
     def predict(self, image: ImageInput) -> AnalysisResult:
@@ -116,7 +129,7 @@ class Predictor:
                 probs = torch.softmax(self.model(x).float(), dim=1)[0].cpu().numpy()
             prob_fake = float(probs[FAKE_LABEL])
             label, conf = self._make_label(prob_fake)
-            target = FAKE_LABEL if cam_target == "fake" else self.class_names.index(label)
+            target = FAKE_LABEL if (cam_target == "fake" or prob_fake >= 0.5) else 1 - FAKE_LABEL
             cam, _ = gradcam(x, class_idx=target)
         elapsed = (time.perf_counter() - t0) * 1000
 

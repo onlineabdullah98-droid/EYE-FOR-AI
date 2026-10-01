@@ -1,6 +1,6 @@
 """Run inference on one or more images and save a Grad-CAM + ELA report panel.
 
-  python scripts/predict.py path/to/image.jpg --checkpoint models/efficientnet_b0_v2.pt
+  python scripts/predict.py path/to/image.jpg --checkpoint models/efficientnet_b0_v3.pt
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def save_panel(result, out_path: Path) -> None:
         ax.imshow(img)
         ax.set_title(title)
         ax.axis("off")
-    color = "#d62828" if result.is_fake else "#2a9d8f"
+    color = "#d62828" if result.is_fake else "#e09f3e" if result.is_uncertain else "#2a9d8f"
     fig.suptitle(f"{result.label}  -  {result.confidence:.1%} confidence", fontsize=16, color=color, weight="bold")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,7 +43,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("images", nargs="+")
     p.add_argument("--checkpoint", default=None, help="Defaults to the best (validation F1) model in models/")
-    p.add_argument("--threshold", type=float, default=0.5)
+    p.add_argument("--threshold", type=float, default=None, help="AI threshold (default: calibrated)")
     p.add_argument("--out", default=str(OUTPUTS_DIR / "predictions"))
     a = p.parse_args()
 

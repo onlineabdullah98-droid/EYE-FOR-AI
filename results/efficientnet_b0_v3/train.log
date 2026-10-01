@@ -1,0 +1,22 @@
+[EYE FOR AI] device=cpu amp=False run_dir=/home/user/EYE-FOR-AI/outputs/runs/efficientnet_b0-20261001-131407
+[data] train=26143 val=2920 test=2937
+[init] weights loaded from models/archive/efficientnet_b0_v2.pt
+Epoch 01/4 | train loss 0.3639 acc 0.8690 | val loss 0.3199 acc 0.8973 f1 0.8755 auc 0.9573 | 947s
+  -> saved new best model (val F1 0.8755)
+Epoch 02/4 | train loss 0.3277 acc 0.8905 | val loss 0.3135 acc 0.9017 f1 0.8797 auc 0.9600 | 813s
+  -> saved new best model (val F1 0.8797)
+Epoch 03/4 | train loss 0.3036 acc 0.9067 | val loss 0.3118 acc 0.9031 f1 0.8829 auc 0.9621 | 820s
+  -> saved new best model (val F1 0.8829)
+Epoch 04/4 | train loss 0.2851 acc 0.9169 | val loss 0.3131 acc 0.9045 f1 0.8849 auc 0.9626 | 883s
+  -> saved new best model (val F1 0.8849)
+[best epoch 4] test results:
+              precision    recall  f1-score   support
+        REAL     0.9263    0.9017    0.9138      1729
+        FAKE     0.8644    0.8974    0.8806      1208
+    accuracy                         0.8999      2937
+   macro avg     0.8954    0.8995    0.8972      2937
+weighted avg     0.9009    0.8999    0.9002      2937
+ROC-AUC: 0.9638
+[calibration] REAL below 0.49, AI at or above 0.66, UNCERTAIN in between | test: 4.0% uncertain, real photos called AI 5.8%, AI called real 9.9%, accuracy when decided 92.2%
+[done] artifacts in /home/user/EYE-FOR-AI/outputs/runs/efficientnet_b0-20261001-131407
+[done] deployable checkpoint: /home/user/EYE-FOR-AI/models/efficientnet_b0_v3.pt

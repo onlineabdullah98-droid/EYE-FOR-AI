@@ -80,7 +80,8 @@ class HistoryStore:
         with Session(self.engine) as session:
             rows = session.execute(select(PredictionRecord.label, func.count()).group_by(PredictionRecord.label))
             counts = {label: n for label, n in rows}
-        return {"total": sum(counts.values()), "REAL": counts.get("REAL", 0), "FAKE": counts.get("FAKE", 0)}
+        return {"total": sum(counts.values()), "REAL": counts.get("REAL", 0), "FAKE": counts.get("FAKE", 0),
+                "UNCERTAIN": counts.get("UNCERTAIN", 0)}
 
     def clear(self) -> None:
         with Session(self.engine) as session:

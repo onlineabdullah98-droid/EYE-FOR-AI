@@ -1,0 +1,38 @@
+Test images never seen in training by v1, v2 or v3. v2 uses one cut-off at 50%; v3 uses its calibrated zone (REAL < 0.49, AI >= 0.66, UNCERTAIN in between).
+
+== REAL photos: share wrongly called AI (lower is better) / share UNCERTAIN for v3
+COCO everyday photos     n=  628  v2 called AI  36.5%   v3 called AI   6.1%   v3 uncertain  4.5%
+Unsplash camera photos   n=  393  v2 called AI  43.3%   v3 called AI   6.9%   v3 uncertain  3.6%
+Unsplash phone photos    n=  111  v2 called AI  36.9%   v3 called AI   3.6%   v3 uncertain  6.3%
+OpenFake real photos     n=  332  v2 called AI   3.9%   v3 called AI   0.9%   v3 uncertain  2.7%
+GenImage real photos     n=  114  v2 called AI   7.9%   v3 called AI   3.5%   v3 uncertain  5.3%
+All real photos          n= 1729  v2 called AI  28.3%   v3 called AI   5.8%   v3 uncertain  4.5%
+
+== AI images: share caught as AI (higher is better) / share wrongly called REAL by v3
+OpenFake (modern)        n=  907  v2 caught  94.6%   v3 caught  88.0%   v3 called real  9.2%
+GenImage                 n=  120  v2 caught  63.3%   v3 caught  60.0%   v3 called real 30.0%
+CIFAKE                   n=  166  v2 caught  98.8%   v3 caught  98.2%   v3 called real  0.6%
+StyleGAN faces           n=   15  v2 caught 100.0%   v3 caught  93.3%   v3 called real  0.0%
+All AI images            n= 1208  v2 caught  92.1%   v3 caught  86.7%   v3 called real  9.9%
+
+== Per AI generator (v3 caught as AI)
+-                      n= 181    98%
+ADM                    n=  29    28%
+BigGAN                 n=  12    83%
+GLIDE                  n=  19    95%
+Midjourney             n=   9    67%
+SD15                   n=  18    67%
+VQDM                   n=  14    21%
+Wukong                 n=  19    79%
+ernie-image-turbo      n=  11    91%
+flux.2-klein-9b        n= 177    97%
+gpt-image-1.5          n= 111    95%
+illustrious            n= 130    96%
+midjourney-7           n=  77    66%
+recraft-v2             n=   8    62%
+recraft-v3             n=  17    65%
+seedream-v5.0          n=   9    89%
+sora-2                 n=  10   100%
+veo-3                  n=  45    78%
+wan-video-2.5          n=  20    95%
+z-image-turbo          n= 253    89%

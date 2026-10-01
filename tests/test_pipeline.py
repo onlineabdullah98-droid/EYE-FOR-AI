@@ -57,7 +57,7 @@ def test_history_store(tmp_path):
     store = HistoryStore(f"sqlite:///{tmp_path / 'h.db'}")
     store.add(filename="a.jpg", image_bytes=b"x", label="FAKE", confidence=0.9, prob_fake=0.9,
               model_name="m", inference_ms=1.0)
-    assert store.stats() == {"total": 1, "REAL": 0, "FAKE": 1}
+    assert store.stats() == {"total": 1, "REAL": 0, "FAKE": 1, "UNCERTAIN": 0}
     assert store.recent()[0]["filename"] == "a.jpg"
 
 
@@ -136,3 +136,31 @@ def test_normalize_image_same_policy_for_any_input_format():
         out, out_ext = normalize_image(data, random.Random(0))
         decoded = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR)
         assert out_ext in (".jpg", ".png") and max(decoded.shape[:2]) == 512
+
+
+def test_calibrate_thresholds():
+    from eyeforai.training import calibrate_thresholds
+
+    rng = np.random.default_rng(0)
+    y = np.r_[np.zeros(1000, int), np.ones(1000, int)]
+    p = np.r_[rng.beta(2, 5, 1000), rng.beta(5, 2, 1000)]  # overlapping real / AI score distributions
+    t = calibrate_thresholds(y, p, max_fpr=0.05, max_fnr=0.10)
+    assert t["real"] <= 0.5 <= t["ai"]
+    assert (p[y == 0] >= t["ai"]).mean() <= 0.051
+    assert (p[y == 1] < t["real"]).mean() <= 0.101
+
+
+def test_three_way_verdict(tmp_path):
+    from eyeforai.config import UNCERTAIN
+    from eyeforai.inference import Predictor
+    from eyeforai.utils import save_checkpoint
+
+    model = build_model("custom_cnn", pretrained=False)
+    ckpt = save_checkpoint(tmp_path / "m.pt", model_name="custom_cnn", num_classes=2, img_size=32,
+                           mean=[0.5] * 3, std=[0.5] * 3, state_dict=model.state_dict(),
+                           thresholds={"real": 0.3, "ai": 0.8})
+    p = Predictor(ckpt)
+    assert (p.real_threshold, p.threshold) == (0.3, 0.8)
+    assert p._make_label(0.9)[0] == "FAKE"
+    assert p._make_label(0.5)[0] == UNCERTAIN
+    assert p._make_label(0.1)[0] == "REAL"

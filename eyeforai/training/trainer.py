@@ -18,7 +18,7 @@ from ..config import CLASS_NAMES, DEFAULT_IMG_SIZE, IMAGENET_MEAN, IMAGENET_STD,
 from ..data import build_dataloaders
 from ..models import build_model, set_backbone_trainable, split_param_groups
 from ..utils import get_device, load_checkpoint, save_checkpoint, set_seed
-from .metrics import compute_metrics, plot_confusion_matrix, plot_history, plot_roc_curve
+from .metrics import calibrate_thresholds, compute_metrics, plot_confusion_matrix, plot_history, plot_roc_curve
 
 
 @dataclass
@@ -198,11 +198,32 @@ def fit(cfg: TrainConfig) -> Path:
     plot_history(history, run_dir / "training_curves.png")
 
     # Final evaluation of the best checkpoint.
-    model.load_state_dict(load_checkpoint(best_path, device)["state_dict"])
+    best = load_checkpoint(best_path, device)
+    model.load_state_dict(best["state_dict"])
     eval_split = "test" if "test" in loaders else "val"
     metrics = evaluate(model, loaders[eval_split], device, run_dir, prefix=eval_split)
     print(f"\n[best epoch {best_epoch}] {eval_split} results:\n{metrics['report']}")
     print(f"ROC-AUC: {metrics['roc_auc']:.4f}")
+
+    # Calibrate the REAL / UNCERTAIN / AI cut-offs on validation data and store them with the model.
+    _, y_val, p_val = predict_loader(model, loaders["val"], device)
+    best["thresholds"] = calibrate_thresholds(y_val, p_val)
+    save_checkpoint(best_path, **best)
+    _, y_eval, p_eval = predict_loader(model, loaders[eval_split], device)
+    t = best["thresholds"]
+    decided = (p_eval < t["real"]) | (p_eval >= t["ai"])
+    summary = {
+        "thresholds": t,
+        "uncertain_share": float(1 - decided.mean()),
+        "real_called_ai": float((p_eval[y_eval == 0] >= t["ai"]).mean()),
+        "ai_called_real": float((p_eval[y_eval == 1] < t["real"]).mean()),
+        "accuracy_when_decided": float(((p_eval[decided] >= t["ai"]).astype(int) == y_eval[decided]).mean()),
+    }
+    (run_dir / f"{eval_split}_three_way.json").write_text(json.dumps(summary, indent=2))
+    print(f"[calibration] REAL below {t['real']:.2f}, AI at or above {t['ai']:.2f}, UNCERTAIN in between | "
+          f"{eval_split}: {summary['uncertain_share']:.1%} uncertain, real photos called AI "
+          f"{summary['real_called_ai']:.1%}, AI called real {summary['ai_called_real']:.1%}, "
+          f"accuracy when decided {summary['accuracy_when_decided']:.1%}")
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     final_path = MODELS_DIR / (cfg.out_name or f"{cfg.model_name}_best.pt")

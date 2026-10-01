@@ -8,6 +8,7 @@ Examples:
   python scripts/prepare_dataset.py --source data/raw/cifake --max-per-class 10000   # quick experiments
   python scripts/prepare_dataset.py --source data/raw/cifake data/raw/faces140k --max-per-class 6000  # combine
   python scripts/prepare_dataset.py --source data/raw/openfake@5000 data/raw/genimage@3500 data/raw/cifake@2000
+  python scripts/prepare_dataset.py --source data/raw/openfake@4000:10000 data/raw/coco@4000   # REAL:FAKE caps
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from eyeforai.data.dataset import scan_directory, write_split
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source", nargs="+", required=True,
-                        help="Dataset root folders; append @N to cap images per class for that source")
+                        help="Dataset folders; append @N (both classes) or @REAL:FAKE to cap images for that source")
     parser.add_argument("--out", default=str(SPLITS_DIR))
     parser.add_argument("--val-size", type=float, default=0.15)
     parser.add_argument("--test-size", type=float, default=0.15)
@@ -38,16 +39,19 @@ def main() -> None:
     rng = random.Random(args.seed)
     samples = []
     for src in args.source:
-        # "path@N" overrides --max-per-class for that source.
+        # "path@N" caps both classes of that source at N, "path@R:F" caps REAL at R and FAKE at F.
         src, _, cap = src.rpartition("@") if "@" in src else (src, "", "")
-        limit = int(cap) if cap else args.max_per_class
+        real_cap, _, fake_cap = cap.partition(":")
+        limits = {0: int(real_cap) if real_cap else args.max_per_class,
+                  1: int(fake_cap or real_cap) if cap else args.max_per_class}
         found = scan_directory(src)
-        if limit:  # cap each source separately so a small dataset is not drowned out when combining
-            by_label: dict[int, list] = {0: [], 1: []}
-            for s in found:
-                by_label[s[1]].append(s)
-            found = [s for lbl in by_label
-                     for s in rng.sample(by_label[lbl], min(limit, len(by_label[lbl])))]
+        by_label: dict[int, list] = {0: [], 1: []}
+        for s in found:
+            by_label[s[1]].append(s)
+        found = []
+        for lbl, items in by_label.items():
+            limit = limits[lbl]
+            found += rng.sample(items, min(limit, len(items))) if limit else items
         print(f"{src}: {len(found)} images")
         samples += found
     if not samples:

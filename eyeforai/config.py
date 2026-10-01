@@ -15,6 +15,8 @@ OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 # Label convention used everywhere: 0 = REAL, 1 = FAKE (FAKE is the positive class).
 CLASS_NAMES: tuple[str, str] = ("REAL", "FAKE")
 REAL_LABEL, FAKE_LABEL = 0, 1
+# Shown when the AI likelihood falls between the calibrated REAL and AI thresholds.
+UNCERTAIN = "UNCERTAIN"
 
 # Folder names that map to each label when scanning public datasets.
 #   CIFAKE: REAL / FAKE      CASIA 2.0: Au / Tp      140k faces: real / fake

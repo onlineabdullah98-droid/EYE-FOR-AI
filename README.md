@@ -2,8 +2,8 @@
 
 Final Year Project (BSCS/BSAI/BSSE/BSCY). You upload an image and the system:
 
-1. tells you whether it is a **real photo** or **AI-generated / manipulated**,
-2. reports **how likely it is AI**, as a percentage with a meter (e.g. *98% AI*),
+1. tells you whether it is a **real photo**, **AI-generated / manipulated**, or **uncertain**,
+2. reports **how likely it is AI**, as a percentage with a meter (e.g. *96% AI*),
 3. explains the decision with a **Grad-CAM heatmap**, **suspicious-region boxes**, and **Error Level Analysis (ELA)**,
 4. stores every prediction in a **history database** (SQLite by default, PostgreSQL optional).
 
@@ -34,10 +34,67 @@ press Ctrl+C.
 
 ## Trained models and results
 
-The app uses **`models/efficientnet_b0_v2.pt`**, which is trained on modern AI generators. Older models are kept in
-`models/archive/` for comparison.
+The app uses **`models/efficientnet_b0_v3.pt`**. Older models are kept in `models/archive/` for comparison.
 
-### v2: modern AI generators (default model)
+### v3: fewer real photos called AI (default model)
+
+v2 caught modern AI images well, but on everyday photos it was wrong far too often. It called **36% of COCO
+photos, 43% of Unsplash camera photos and 37% of phone photos "AI"**. Its training set had almost no ordinary
+camera or phone photos. v3 continues from v2 with 9,000 more real photos, plus one more OpenFake shard so the
+classes stay balanced:
+
+- **COCO val2017:** 5,000 everyday Flickr photos.
+- **Unsplash Lite:** 4,000 photos with camera EXIF, submitted before July 2021, including 839 taken with phones.
+
+v3 also gives a **three-way verdict**. After training, two cut-offs are calibrated on validation data and stored
+in the checkpoint:
+- **AI** from an AI likelihood of 66%. At most about 5% of real photos score this high.
+- **REAL** below 49%. At most about 10% of AI images score this low.
+- **UNCERTAIN** in between.
+
+You can move both cut-offs with the *Uncertain zone* slider in the app's sidebar.
+
+**Clean test set:** 2,937 images that none of v1, v2 or v3 saw during training or model selection.
+
+| Real photos wrongly called AI | v2 (cut-off 50%) | **v3** | v3 uncertain |
+|---|---|---|---|
+| COCO everyday photos (628) | 36.5% | **6.1%** | 4.5% |
+| Unsplash camera photos (393) | 43.3% | **6.9%** | 3.6% |
+| Unsplash phone photos (111) | 36.9% | **3.6%** | 6.3% |
+| All real photos (1,729) | 28.3% | **5.8%** | 4.5% |
+
+| AI images caught | v2 | **v3** | v3 wrongly called real |
+|---|---|---|---|
+| OpenFake, 2025–26 generators (907) | 94.6% | 88.0% | 9.2% |
+| GenImage (120) | 63.3% | 60.0% | 30.0% |
+| All AI images (1,208) | 92.1% | 86.7% | 9.9% |
+
+v3 overall: accuracy 90.0% at a 50% cut-off, ROC-AUC 0.964. With the three-way verdict, 4.0% of images come out
+UNCERTAIN, and the model is right on **92.2%** of the images it does decide.
+
+The trade-off is deliberate. v3 catches about 5 points fewer AI images than v2, but wrongly accuses five times
+fewer real photos. AI images caught by generator: Sora-2 100%, Flux.2 97%, Illustrious 96%, GPT-Image-1.5 95%,
+Wan-2.5 95%, Z-Image 89%, Veo-3 78%, Midjourney-7 66%, Recraft-v3 65%. Older GenImage generators ADM (28%) and VQDM
+(21%) remain weak. Full numbers are in `results/efficientnet_b0_v3/`.
+
+| AI image (GPT-Image-1.5) | iPhone photo (v2 said 93% AI) | Uncertain case |
+|---|---|---|
+| ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) | ![uncertain](docs/screenshots/analyze_uncertain.png) |
+
+To reproduce v3 (after the v2 downloads below):
+```bash
+python scripts/download_data.py --dataset coco                       # ~800 MB, 5,000 real photos
+python scripts/download_data.py --dataset unsplash --max-per-class 4000
+# a third OpenFake shard (test-00002) adds ~3,500 more AI images
+python scripts/prepare_dataset.py --out data/splits_v3 --source data/raw/openfake@4000:10000 data/raw/coco@4000:0 \
+    data/raw/unsplash@3500:0 data/raw/genimage@2500:3500 data/raw/cifake@1000:1250 data/raw/faces140k@1000:1250
+python scripts/train.py --model efficientnet_b0 --splits-dir data/splits_v3 --init-from models/archive/efficientnet_b0_v2.pt \
+    --img-size 160 --epochs 4 --freeze-epochs 0 --lr 3e-4 --out-name efficientnet_b0_v3.pt
+```
+For the published numbers, validation and test images that v1 or v2 had trained on were moved into the training
+split (3,743 images), so the test set is clean.
+
+### v2: modern AI generators
 
 The first model (v1) only saw CIFAKE and StyleGAN faces. On images from current generators it said REAL almost
 every time: only 12% of OpenFake AI images were caught. v2 continues training from v1 on four datasets.
@@ -97,10 +154,8 @@ These were trained on 21,000 CIFAKE and 140k Faces images (14,700 train / 3,150 
 shows that transfer learning beats a CNN trained from scratch by about 9 points on the same data. Plots and logs are
 in `results/custom_cnn_v1/` and `results/efficientnet_b0_v1/`.
 
-| AI image (Midjourney 7) | Real photo |
-|---|---|
-| ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) |
 | **Grad-CAM** (v1 model, StyleGAN face) | **Error Level Analysis** |
+|---|---|
 | ![gradcam](docs/screenshots/gradcam.png) | ![ela](docs/screenshots/ela.png) |
 
 ![Model performance tab](docs/screenshots/model_performance.png)
@@ -133,7 +188,7 @@ EYE-FOR-AI/
 │   ├── inference/predictor.py   # Predictor: classify + explain in one call
 │   └── db/history.py            # prediction history (SQLite / PostgreSQL)
 ├── scripts/
-│   ├── download_data.py         # CIFAKE / 140k Faces / GenImage / OpenFake (HuggingFace), CASIA (Kaggle)
+│   ├── download_data.py         # CIFAKE, Faces, GenImage, OpenFake, COCO, Unsplash, CASIA (Kaggle)
 │   ├── prepare_dataset.py       # stratified train/val/test CSV manifests
 │   ├── train.py                 # train any model
 │   ├── evaluate.py              # evaluate a saved checkpoint
@@ -142,7 +197,7 @@ EYE-FOR-AI/
 ├── results/                     # metrics, plots and logs of the included trained models
 ├── docs/screenshots/            # app screenshots
 ├── data/                        # datasets (git-ignored)
-├── models/                      # efficientnet_b0_v2.pt (used by the app) + archive/ with v1 models
+├── models/                      # efficientnet_b0_v3.pt (used by the app) + archive/ with v1/v2 models
 └── outputs/                     # training runs, plots, predictions, history DB (git-ignored)
 ```
 
@@ -231,7 +286,7 @@ The best checkpoint is also copied to `models/<model>_best.pt`, which the app an
 
 To re-evaluate a checkpoint later:
 ```bash
-python scripts/evaluate.py --checkpoint models/efficientnet_b0_v2.pt --split test
+python scripts/evaluate.py --checkpoint models/efficientnet_b0_v3.pt --split test
 ```
 
 **Compute:** training transfer models on the full CIFAKE set is slow on a CPU. Use a GPU (for example Google Colab,
@@ -254,7 +309,7 @@ below) or prepare a smaller split with `--max-per-class`.
 ## 5. Inference and explainability (FYP-2)
 
 ```bash
-python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v2.pt
+python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v3.pt
 ```
 This prints a JSON result and saves `outputs/predictions/<folder>_<name>_analysis.png`, a four-panel image:
 Original · Grad-CAM · Suspicious regions · ELA.
@@ -262,9 +317,9 @@ Original · Grad-CAM · Suspicious regions · ELA.
 From Python:
 ```python
 from eyeforai.inference import Predictor
-p = Predictor("models/efficientnet_b0_v2.pt")
+p = Predictor("models/efficientnet_b0_v3.pt")
 r = p.analyze("photo.jpg")
-print(r.label, f"{r.confidence:.1%}")      # FAKE 94.5%
+print(r.label, f"{r.prob_fake:.1%} AI")    # FAKE / REAL / UNCERTAIN, e.g. FAKE 96.3% AI
 r.gradcam_overlay, r.regions_overlay, r.ela.heatmap   # RGB numpy arrays
 ```
 
@@ -330,8 +385,8 @@ test cross-dataset generalisation (train on CIFAKE, evaluate on CASIA with `eval
 
 - A model only knows the kinds of fakes it was trained on. New generators, heavy compression, or screenshots
   reduce accuracy. Present results as decision support, not proof.
-- The v2 model is about 89% accurate overall, so roughly 1 in 10 images will be judged wrong. It is weakest on
-  ADM, VQDM and Recraft images and on edited (rather than fully generated) photos. Screenshots, heavy filters and
-  images shrunk very small also reduce accuracy.
+- The v3 model is right on about 92% of the images it decides. About 6% of real photos are still called AI, and
+  about 10% of AI images are called real. It is weakest on Midjourney-7, Recraft, ADM and VQDM images and on edited
+  (rather than fully generated) photos. Screenshots, heavy filters and very small images also reduce accuracy.
 - Training was done on a CPU at 160 px. Training on a GPU with more OpenFake shards at 224 px should improve results.
 - ELA is not meaningful on PNGs or images that have been re-compressed many times.

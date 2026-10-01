@@ -14,6 +14,8 @@ Usage:
   python scripts/download_data.py --dataset faces140k --max-shards 1 --max-per-class 3000
   python scripts/download_data.py --dataset genimage --splits train --max-shards 4
   python scripts/download_data.py --dataset openfake --splits test --max-shards 1 --max-per-class 3000
+  python scripts/download_data.py --dataset coco --max-per-class 5000        # real everyday photos only
+  python scripts/download_data.py --dataset unsplash --max-per-class 4000    # real camera/phone photos only
   python scripts/download_data.py --dataset casia2 --source kaggle
 """
 
@@ -37,6 +39,7 @@ import numpy as np
 import _bootstrap  # noqa: F401
 
 from eyeforai.config import RAW_DATA_DIR
+
 
 @dataclass(frozen=True)
 class HFDataset:
@@ -70,6 +73,13 @@ KAGGLE_DATASETS = {
 }
 
 HF_BASE = "https://huggingface.co"
+
+# Real-photo-only sources. They balance the AI-heavy datasets with everyday camera and phone photos, which a
+# detector trained mostly on ImageNet photos otherwise tends to call AI.
+COCO_ZIP = "http://images.cocodataset.org/zips/val2017.zip"  # 5,000 Flickr photos, ~800 MB
+UNSPLASH_REPO = "1aurent/unsplash-lite"                      # 25,000 photos with camera EXIF (metadata + URLs)
+UNSPLASH_BEFORE = "2021-07"  # only photos submitted before AI image generators became widespread
+PHONE_MAKES = ("APPLE", "SAMSUNG", "GOOGLE", "HUAWEI", "XIAOMI", "ONEPLUS", "OPPO", "VIVO", "MOTOROLA", "LG", "NOKIA")
 
 
 def _image_ext(data: bytes, path: str | None) -> str:
@@ -198,6 +208,72 @@ def download_hf(dataset: str, target: Path, max_shards: int | None, max_per_clas
         print(f"  {split:10s} {name:5s} {n:6d} images")
 
 
+def _write_real(out_dir: Path, name: str, data: bytes, rng: random.Random) -> bool:
+    converted = normalize_image(data, rng)
+    if converted is None:
+        return False
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{name}{converted[1]}").write_bytes(converted[0])
+    return True
+
+
+def download_coco(target: Path, max_images: int | None) -> None:
+    import zipfile
+
+    cache = target / "_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    zip_path = cache / "val2017.zip"
+    if not zip_path.exists():
+        _download(COCO_ZIP, zip_path)
+    rng, n = random.Random(0), 0
+    with zipfile.ZipFile(zip_path) as zf:
+        names = sorted(f for f in zf.namelist() if f.endswith(".jpg"))
+        for f in names[:max_images] if max_images else names:
+            n += _write_real(target / "REAL", f"coco_{Path(f).stem}", zf.read(f), rng)
+    shutil.rmtree(cache)
+    print(f"  REAL {n:6d} images")
+
+
+def download_unsplash(target: Path, max_images: int | None, workers: int = 16) -> None:
+    """Fetch camera photos (EXIF make present, submitted before 2021-07), every phone photo first."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import pyarrow.parquet as pq
+
+    cache = target / "_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(f"{HF_BASE}/api/datasets/{UNSPLASH_REPO}/tree/main/data") as resp:
+        shards = sorted(f["path"] for f in json.load(resp) if f["path"].endswith(".parquet"))
+    photos = []
+    for shard in shards:
+        local = cache / Path(shard).name
+        if not local.exists():
+            _download(f"{HF_BASE}/datasets/{UNSPLASH_REPO}/resolve/main/{shard}", local)
+        for row in pq.read_table(local, columns=["photo", "exif"]).to_pylist():
+            make = (row["exif"]["camera_make"] or "").split(" ")[0].upper()
+            if make and make != "NAN" and (row["photo"]["submitted_at"] or "9999") < UNSPLASH_BEFORE:
+                photos.append((row["photo"]["id"], row["photo"]["image_url"], make))
+
+    rng = random.Random(0)
+    rng.shuffle(photos)
+    photos.sort(key=lambda p: p[2] not in PHONE_MAKES)  # stable: phones first, the rest stays shuffled
+    photos = photos[:max_images] if max_images else photos
+
+    def fetch(item: tuple[str, str, str]) -> bool:
+        pid, url, make = item
+        try:
+            with urllib.request.urlopen(f"{url}?w=768&fm=jpg&q=90", timeout=60) as resp:
+                data = resp.read()
+        except OSError:
+            return False
+        return _write_real(target / "REAL", f"unsplash-{make.lower()}_{pid}", data, random.Random(pid))
+
+    with ThreadPoolExecutor(workers) as pool:
+        n = sum(pool.map(fetch, photos))
+    shutil.rmtree(cache)
+    print(f"  REAL {n:6d} images ({sum(p[2] in PHONE_MAKES for p in photos)} from phones)")
+
+
 def download_kaggle(dataset: str, target: Path) -> None:
     cmd = ["kaggle", "datasets", "download", "-d", KAGGLE_DATASETS[dataset], "-p", str(target), "--unzip"]
     print("Running:", " ".join(cmd))
@@ -212,7 +288,8 @@ def download_kaggle(dataset: str, target: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", choices=sorted({*HF_DATASETS, *KAGGLE_DATASETS}), required=True)
+    parser.add_argument("--dataset", choices=sorted({*HF_DATASETS, *KAGGLE_DATASETS, "coco", "unsplash"}),
+                        required=True)
     parser.add_argument("--source", choices=("huggingface", "kaggle"), default="huggingface")
     parser.add_argument("--max-shards", type=int, default=None, help="HuggingFace: parquet shards per split")
     parser.add_argument("--max-per-class", type=int, default=None, help="HuggingFace: images per class per split")
@@ -221,13 +298,17 @@ def main() -> None:
     args = parser.parse_args()
 
     source = args.source
-    if source == "huggingface" and args.dataset not in HF_DATASETS:
+    if source == "huggingface" and args.dataset not in {*HF_DATASETS, "coco", "unsplash"}:
         print(f"'{args.dataset}' is only available on Kaggle - switching source.")
         source = "kaggle"
 
     target = RAW_DATA_DIR / args.dataset
     target.mkdir(parents=True, exist_ok=True)
-    if source == "huggingface":
+    if args.dataset == "coco":
+        download_coco(target, args.max_per_class)
+    elif args.dataset == "unsplash":
+        download_unsplash(target, args.max_per_class)
+    elif source == "huggingface":
         download_hf(args.dataset, target, args.max_shards, args.max_per_class, args.splits, args.keep_parquet)
     else:
         download_kaggle(args.dataset, target)
