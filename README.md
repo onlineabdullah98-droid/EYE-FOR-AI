@@ -19,6 +19,19 @@ Final Year Project (BSCS/BSAI/BSSE/BSCY). You upload an image and the system:
 
 ---
 
+## Quick start (one click)
+
+After cloning the repo:
+
+- **Windows:** double-click **`run_app.bat`** in the project folder.
+- **macOS / Linux:** run `./run_app.sh` in a terminal.
+
+The first run creates a virtual environment and installs the libraries, which takes 5–10 minutes. Every later run
+starts the app straight away. The browser opens at **http://localhost:8501**. To stop the app, close the window or
+press Ctrl+C.
+
+---
+
 ## Trained models and results
 
 Two trained models are included in `models/`, so the app works right after cloning:
@@ -61,6 +74,7 @@ With a GPU you can train on more data at full resolution (`--img-size 224`), whi
 EYE-FOR-AI/
 ├── app.py                       # Streamlit web app (drag & drop, verdict, heatmaps, history)
 ├── api.py                       # Flask REST API  (POST /api/predict)
+├── run_app.bat / run_app.sh     # one-click setup + launch (Windows / macOS-Linux)
 ├── requirements.txt
 ├── eyeforai/                    # core Python package
 │   ├── config.py                # paths, labels (0=REAL, 1=FAKE), defaults, DB URL
