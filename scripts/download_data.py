@@ -16,6 +16,8 @@ Usage:
   python scripts/download_data.py --dataset openfake --splits test --max-shards 1 --max-per-class 3000
   python scripts/download_data.py --dataset coco --max-per-class 5000        # real everyday photos only
   python scripts/download_data.py --dataset unsplash --max-per-class 4000    # real camera/phone photos only
+  python scripts/download_data.py --dataset wikiart --max-shards 4          # real paintings / artworks only
+  python scripts/download_data.py --dataset diffusiondb --max-shards 3      # Stable Diffusion art only
   python scripts/download_data.py --dataset casia2 --source kaggle
 """
 
@@ -79,6 +81,9 @@ HF_BASE = "https://huggingface.co"
 COCO_ZIP = "http://images.cocodataset.org/zips/val2017.zip"  # 5,000 Flickr photos, ~800 MB
 UNSPLASH_REPO = "1aurent/unsplash-lite"                      # 25,000 photos with camera EXIF (metadata + URLs)
 UNSPLASH_BEFORE = "2021-07"  # only photos submitted before AI image generators became widespread
+WIKIART_REPO, WIKIART_SHARDS = "huggan/wikiart", 72        # 81k artworks by 129 artists, ~520 MB per shard
+DIFFUSIONDB_REPO, DIFFUSIONDB_PARTS = "poloclub/diffusiondb", 2000  # 1,000 Stable Diffusion images per part
+EXTRA_DATASETS = ("coco", "unsplash", "wikiart", "diffusiondb")  # single-class sources with their own downloaders
 PHONE_MAKES = ("APPLE", "SAMSUNG", "GOOGLE", "HUAWEI", "XIAOMI", "ONEPLUS", "OPPO", "VIVO", "MOTOROLA", "LG", "NOKIA")
 
 
@@ -274,6 +279,63 @@ def download_unsplash(target: Path, max_images: int | None, workers: int = 16) -
     print(f"  REAL {n:6d} images ({sum(p[2] in PHONE_MAKES for p in photos)} from phones)")
 
 
+def _spread(n_wanted: int | None, total: int, default: int) -> list[int]:
+    """Evenly spaced shard indices, so a few shards still cover many artists / time periods."""
+    n = min(n_wanted or default, total)
+    return sorted({round(i * total / n) for i in range(n)})
+
+
+def download_wikiart(target: Path, n_shards: int | None, max_images: int | None) -> None:
+    """Real paintings and artworks, so that "looks like a painting" is not learned as "AI"."""
+    import pyarrow.parquet as pq
+
+    cache = target / "_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    rng, n = random.Random(0), 0
+    for i in _spread(n_shards, WIKIART_SHARDS, 4):
+        name = f"train-{i:05d}-of-{WIKIART_SHARDS:05d}.parquet"
+        local = cache / name
+        if not local.exists():
+            _download(f"{HF_BASE}/datasets/{WIKIART_REPO}/resolve/main/data/{name}", local)
+        pf = pq.ParquetFile(local)
+        meta = pf.schema_arrow.metadata or {}
+        styles = (json.loads(meta[b"huggingface"])["info"]["features"]["style"].get("names")
+                  if b"huggingface" in meta else None)
+        for batch in pf.iter_batches(batch_size=100, columns=["image", "style"]):
+            for img, style in zip(batch.column("image").to_pylist(), batch.column("style").to_pylist()):
+                if max_images and n >= max_images:
+                    break
+                tag = styles[style].lower() if styles else f"style{style}"
+                n += _write_real(target / "REAL", f"wikiart-{tag}_{n:06d}", img["bytes"], rng)
+    shutil.rmtree(cache)
+    print(f"  REAL {n:6d} artworks")
+
+
+def download_diffusiondb(target: Path, n_parts: int | None, max_images: int | None) -> None:
+    """AI-generated art (Stable Diffusion 1.x, 2022), the counterpart of the WikiArt paintings."""
+    import zipfile
+
+    cache = target / "_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    rng, n = random.Random(0), 0
+    for i in _spread(n_parts, DIFFUSIONDB_PARTS, 3):
+        name = f"part-{max(i, 1):06d}.zip"
+        local = cache / name
+        if not local.exists():
+            _download(f"{HF_BASE}/datasets/{DIFFUSIONDB_REPO}/resolve/main/images/{name}", local)
+        with zipfile.ZipFile(local) as zf:
+            for f in sorted(x for x in zf.namelist() if x.endswith((".png", ".webp", ".jpg"))):
+                if max_images and n >= max_images:
+                    break
+                converted = normalize_image(zf.read(f), rng)
+                if converted:
+                    (target / "FAKE").mkdir(parents=True, exist_ok=True)
+                    (target / "FAKE" / f"diffusiondb_{Path(f).stem}{converted[1]}").write_bytes(converted[0])
+                    n += 1
+    shutil.rmtree(cache)
+    print(f"  FAKE {n:6d} images")
+
+
 def download_kaggle(dataset: str, target: Path) -> None:
     cmd = ["kaggle", "datasets", "download", "-d", KAGGLE_DATASETS[dataset], "-p", str(target), "--unzip"]
     print("Running:", " ".join(cmd))
@@ -288,7 +350,7 @@ def download_kaggle(dataset: str, target: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dataset", choices=sorted({*HF_DATASETS, *KAGGLE_DATASETS, "coco", "unsplash"}),
+    parser.add_argument("--dataset", choices=sorted({*HF_DATASETS, *KAGGLE_DATASETS, *EXTRA_DATASETS}),
                         required=True)
     parser.add_argument("--source", choices=("huggingface", "kaggle"), default="huggingface")
     parser.add_argument("--max-shards", type=int, default=None, help="HuggingFace: parquet shards per split")
@@ -298,7 +360,7 @@ def main() -> None:
     args = parser.parse_args()
 
     source = args.source
-    if source == "huggingface" and args.dataset not in {*HF_DATASETS, "coco", "unsplash"}:
+    if source == "huggingface" and args.dataset not in {*HF_DATASETS, *EXTRA_DATASETS}:
         print(f"'{args.dataset}' is only available on Kaggle - switching source.")
         source = "kaggle"
 
@@ -308,6 +370,10 @@ def main() -> None:
         download_coco(target, args.max_per_class)
     elif args.dataset == "unsplash":
         download_unsplash(target, args.max_per_class)
+    elif args.dataset == "wikiart":
+        download_wikiart(target, args.max_shards, args.max_per_class)
+    elif args.dataset == "diffusiondb":
+        download_diffusiondb(target, args.max_shards, args.max_per_class)
     elif source == "huggingface":
         download_hf(args.dataset, target, args.max_shards, args.max_per_class, args.splits, args.keep_parquet)
     else:

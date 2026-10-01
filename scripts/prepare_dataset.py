@@ -51,7 +51,7 @@ def main() -> None:
         found = []
         for lbl, items in by_label.items():
             limit = limits[lbl]
-            found += rng.sample(items, min(limit, len(items))) if limit else items
+            found += items if limit is None else rng.sample(items, min(limit, len(items)))
         print(f"{src}: {len(found)} images")
         samples += found
     if not samples:

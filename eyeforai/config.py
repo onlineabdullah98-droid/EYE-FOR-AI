@@ -17,6 +17,9 @@ CLASS_NAMES: tuple[str, str] = ("REAL", "FAKE")
 REAL_LABEL, FAKE_LABEL = 0, 1
 # Shown when the AI likelihood falls between the calibrated REAL and AI thresholds.
 UNCERTAIN = "UNCERTAIN"
+# Below this size (longest side, pixels) too much detail is lost for a trustworthy verdict, so the
+# result is reported as UNCERTAIN whatever the score.
+MIN_RELIABLE_SIZE = 256
 
 # Folder names that map to each label when scanning public datasets.
 #   CIFAKE: REAL / FAKE      CASIA 2.0: Au / Tp      140k faces: real / fake

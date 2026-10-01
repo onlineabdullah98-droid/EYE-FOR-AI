@@ -81,7 +81,8 @@ def test_end_to_end(tiny_dataset, tmp_path, monkeypatch):
     predictor = Predictor(ckpt)
     fake_img = next((tiny_dataset / "train" / "FAKE").glob("*.png"))
     result = predictor.analyze(fake_img)
-    assert result.label in ("REAL", "FAKE") and 0.5 <= result.confidence <= 1.0
+    # The synthetic images are 64 px, below MIN_RELIABLE_SIZE, so no verdict is given.
+    assert result.low_resolution and result.label == "UNCERTAIN" and 0.5 <= result.confidence <= 1.0
     assert result.gradcam_overlay.shape == result.image.shape
     assert result.ela is not None
     assert predictor.predict(fake_img.read_bytes()).label == result.label
@@ -164,3 +165,6 @@ def test_three_way_verdict(tmp_path):
     assert p._make_label(0.9)[0] == "FAKE"
     assert p._make_label(0.5)[0] == UNCERTAIN
     assert p._make_label(0.1)[0] == "REAL"
+    # Small images never get a confident verdict.
+    assert p._make_label(0.99, (120, 200, 3))[0] == UNCERTAIN
+    assert p._make_label(0.99, (300, 400, 3))[0] == "FAKE"

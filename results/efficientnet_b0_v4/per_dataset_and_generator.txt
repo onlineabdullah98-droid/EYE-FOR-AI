@@ -1,0 +1,41 @@
+Clean test set: no image was used to train or select v1-v4. Each model uses its own calibrated zone: v3 REAL<0.49 AI>=0.66, v4 REAL<0.45 AI>=0.64.
+
+== REAL images wrongly called AI (lower is better)
+WikiArt paintings        n=  525  v3  29.1%   v4   2.1%   (v4 uncertain 5.1%)
+COCO everyday photos     n=  628  v3   6.1%   v4   6.5%   (v4 uncertain 5.3%)
+Unsplash camera photos   n=  393  v3   6.9%   v4   7.9%   (v4 uncertain 4.3%)
+Unsplash phone photos    n=  111  v3   3.6%   v4   4.5%   (v4 uncertain 2.7%)
+OpenFake real photos     n=  332  v3   0.9%   v4   1.2%   (v4 uncertain 2.7%)
+GenImage real photos     n=  114  v3   3.5%   v4   4.4%   (v4 uncertain 3.5%)
+All real images          n= 2254  v3  11.3%   v4   5.1%   (v4 uncertain 4.7%)
+
+== AI images caught as AI (higher is better)
+DiffusionDB AI art       n=  450  v3  74.7%   v4  86.7%   (v4 called real 6.9%)
+OpenFake (2025-26)       n=  907  v3  88.0%   v4  89.1%   (v4 called real 7.3%)
+GenImage                 n=  120  v3  60.0%   v4  62.5%   (v4 called real 27.5%)
+CIFAKE                   n=  166  v3  98.2%   v4  98.2%   (v4 called real 1.2%)
+StyleGAN faces           n=   15  v3  93.3%   v4 100.0%   (v4 called real 0.0%)
+All AI images            n= 1658  v3  83.4%   v4  87.5%   (v4 called real 8.0%)
+
+== Per AI generator (v4 caught as AI)
+-                      n= 181    98%
+ADM                    n=  29    34%
+BigGAN                 n=  12    92%
+GLIDE                  n=  19    89%
+Midjourney             n=   9    67%
+SD15                   n=  18    67%
+VQDM                   n=  14    21%
+Wukong                 n=  19    84%
+diffusiondb            n= 450    87%
+ernie-image-turbo      n=  11    91%
+flux.2-klein-9b        n= 177    96%
+gpt-image-1.5          n= 111    97%
+illustrious            n= 130    97%
+midjourney-7           n=  77    71%
+recraft-v2             n=   8    62%
+recraft-v3             n=  17    59%
+seedream-v5.0          n=   9    78%
+sora-2                 n=  10   100%
+veo-3                  n=  45    80%
+wan-video-2.5          n=  20    90%
+z-image-turbo          n= 253    90%

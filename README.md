@@ -2,7 +2,7 @@
 
 Final Year Project (BSCS/BSAI/BSSE/BSCY). You upload an image and the system:
 
-1. tells you whether it is a **real photo**, **AI-generated / manipulated**, or **uncertain**,
+1. tells you whether it is **real** (a photo or artwork not made by AI), **AI-generated / manipulated**, or **uncertain**,
 2. reports **how likely it is AI**, as a percentage with a meter (e.g. *96% AI*),
 3. explains the decision with a **Grad-CAM heatmap**, **suspicious-region boxes**, and **Error Level Analysis (ELA)**,
 4. stores every prediction in a **history database** (SQLite by default, PostgreSQL optional).
@@ -34,9 +34,57 @@ press Ctrl+C.
 
 ## Trained models and results
 
-The app uses **`models/efficientnet_b0_v3.pt`**. Older models are kept in `models/archive/` for comparison.
+The app uses **`models/efficientnet_b0_v4.pt`**. Older models are kept in `models/archive/` for comparison.
 
-### v3: fewer real photos called AI (default model)
+### v4: paintings and artwork (default model)
+
+v3 had only seen photos as "real". It called **29% of real paintings AI**: art looked like AI to it, because much of
+its AI class was AI art. A user's Mona Lisa came out as 96% AI. v4 continues from v3 with two art sources:
+
+- **WikiArt:** 3,500 real artworks by 129 artists, from 4 shards spread across the dataset.
+- **DiffusionDB:** 3,000 Stable Diffusion images, most of them in painting or illustration styles.
+
+The test set has 3,912 images. It is the clean v3 test set plus 975 art images, none of them used for training.
+
+| Real images wrongly called AI | v3 | **v4** |
+|---|---|---|
+| WikiArt paintings (525) | 29.1% | **2.1%** |
+| COCO everyday photos (628) | 6.1% | 6.5% |
+| Unsplash phone photos (111) | 3.6% | 4.5% |
+| All real images (2,254) | 11.3% | **5.1%** |
+
+| AI images caught | v3 | **v4** |
+|---|---|---|
+| DiffusionDB AI art (450) | 74.7% | **86.7%** |
+| OpenFake, 2025–26 generators (907) | 88.0% | 89.1% |
+| All AI images (1,658) | 83.4% | **87.5%** |
+
+v4 overall: accuracy 91.4% at a 50% cut-off, ROC-AUC 0.969. With its calibrated zone (REAL below 45%, AI from 64%),
+4.6% of images are UNCERTAIN and **93.4%** of the decided images are correct. Per-generator results are in
+`results/efficientnet_b0_v4/`.
+
+**Small images get no verdict.** If the longest side of an image is under 256 px (`MIN_RELIABLE_SIZE` in
+`eyeforai/config.py`), the result is UNCERTAIN and the app shows a warning. The AI likelihood is still displayed.
+The Mona Lisa that prompted v4 was a 148×225 px copy. v4 lowers its AI likelihood from 96% to 79%, but the score is
+still high, so this specific image remains a known failure case.
+
+| AI image (GPT-Image-1.5) | Phone photo (v2 said 93% AI) | Small image (Mona Lisa, 148×225) |
+|---|---|---|
+| ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) | ![uncertain](docs/screenshots/analyze_uncertain.png) |
+| **Real painting (WikiArt)** | **AI painting (Stable Diffusion)** | |
+| ![painting](docs/screenshots/analyze_painting.png) | ![ai art](docs/screenshots/analyze_ai_art.png) | |
+
+To reproduce v4 (after the v3 steps below):
+```bash
+python scripts/download_data.py --dataset wikiart --max-shards 4        # ~2 GB, 4,525 artworks
+python scripts/download_data.py --dataset diffusiondb --max-shards 3    # ~1.9 GB, 3,000 AI images
+python scripts/prepare_dataset.py --out data/splits_art --source data/raw/wikiart@3500:0 data/raw/diffusiondb@0:3000
+# data/splits_v4/<split>.csv = data/splits_v3/<split>.csv + data/splits_art/<split>.csv (rows concatenated)
+python scripts/train.py --model efficientnet_b0 --splits-dir data/splits_v4 --init-from models/archive/efficientnet_b0_v3.pt \
+    --img-size 160 --epochs 3 --freeze-epochs 0 --lr 2e-4 --out-name efficientnet_b0_v4.pt
+```
+
+### v3: fewer real photos called AI
 
 v2 caught modern AI images well, but on everyday photos it was wrong far too often. It called **36% of COCO
 photos, 43% of Unsplash camera photos and 37% of phone photos "AI"**. Its training set had almost no ordinary
@@ -76,10 +124,6 @@ The trade-off is deliberate. v3 catches about 5 points fewer AI images than v2, 
 fewer real photos. AI images caught by generator: Sora-2 100%, Flux.2 97%, Illustrious 96%, GPT-Image-1.5 95%,
 Wan-2.5 95%, Z-Image 89%, Veo-3 78%, Midjourney-7 66%, Recraft-v3 65%. Older GenImage generators ADM (28%) and VQDM
 (21%) remain weak. Full numbers are in `results/efficientnet_b0_v3/`.
-
-| AI image (GPT-Image-1.5) | iPhone photo (v2 said 93% AI) | Uncertain case |
-|---|---|---|
-| ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) | ![uncertain](docs/screenshots/analyze_uncertain.png) |
 
 To reproduce v3 (after the v2 downloads below):
 ```bash
@@ -197,7 +241,7 @@ EYE-FOR-AI/
 ├── results/                     # metrics, plots and logs of the included trained models
 ├── docs/screenshots/            # app screenshots
 ├── data/                        # datasets (git-ignored)
-├── models/                      # efficientnet_b0_v3.pt (used by the app) + archive/ with v1/v2 models
+├── models/                      # efficientnet_b0_v4.pt (used by the app) + archive/ with v1-v3 models
 └── outputs/                     # training runs, plots, predictions, history DB (git-ignored)
 ```
 
@@ -286,7 +330,7 @@ The best checkpoint is also copied to `models/<model>_best.pt`, which the app an
 
 To re-evaluate a checkpoint later:
 ```bash
-python scripts/evaluate.py --checkpoint models/efficientnet_b0_v3.pt --split test
+python scripts/evaluate.py --checkpoint models/efficientnet_b0_v4.pt --split test
 ```
 
 **Compute:** training transfer models on the full CIFAKE set is slow on a CPU. Use a GPU (for example Google Colab,
@@ -309,7 +353,7 @@ below) or prepare a smaller split with `--max-per-class`.
 ## 5. Inference and explainability (FYP-2)
 
 ```bash
-python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v3.pt
+python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v4.pt
 ```
 This prints a JSON result and saves `outputs/predictions/<folder>_<name>_analysis.png`, a four-panel image:
 Original · Grad-CAM · Suspicious regions · ELA.
@@ -317,7 +361,7 @@ Original · Grad-CAM · Suspicious regions · ELA.
 From Python:
 ```python
 from eyeforai.inference import Predictor
-p = Predictor("models/efficientnet_b0_v3.pt")
+p = Predictor("models/efficientnet_b0_v4.pt")
 r = p.analyze("photo.jpg")
 print(r.label, f"{r.prob_fake:.1%} AI")    # FAKE / REAL / UNCERTAIN, e.g. FAKE 96.3% AI
 r.gradcam_overlay, r.regions_overlay, r.ela.heatmap   # RGB numpy arrays
@@ -385,8 +429,8 @@ test cross-dataset generalisation (train on CIFAKE, evaluate on CASIA with `eval
 
 - A model only knows the kinds of fakes it was trained on. New generators, heavy compression, or screenshots
   reduce accuracy. Present results as decision support, not proof.
-- The v3 model is right on about 92% of the images it decides. About 6% of real photos are still called AI, and
-  about 10% of AI images are called real. It is weakest on Midjourney-7, Recraft, ADM and VQDM images and on edited
+- The v4 model is right on about 93% of the images it decides. About 5% of real images are still called AI, and
+  about 8% of AI images are called real. Images under 256 px get no verdict. It is weakest on Midjourney-7, Recraft, ADM and VQDM images and on edited
   (rather than fully generated) photos. Screenshots, heavy filters and very small images also reduce accuracy.
 - Training was done on a CPU at 160 px. Training on a GPU with more OpenFake shards at 224 px should improve results.
 - ELA is not meaningful on PNGs or images that have been re-compressed many times.

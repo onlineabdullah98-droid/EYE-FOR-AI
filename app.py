@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-from eyeforai.config import OUTPUTS_DIR, PROJECT_ROOT
+from eyeforai.config import MIN_RELIABLE_SIZE, OUTPUTS_DIR, PROJECT_ROOT
 from eyeforai.db import HistoryStore
 from eyeforai.explain import error_level_analysis
 from eyeforai.inference import Predictor, find_checkpoints
@@ -74,9 +74,9 @@ def verdict_text(prob_ai: float, real_t: float, ai_t: float) -> str:
     if prob_ai >= ai_t:
         return "Likely AI-generated / manipulated"
     if prob_ai < min(real_t, 0.1):
-        return "Very likely a real photo"
+        return "Very likely real - a photo or artwork not made by AI"
     if prob_ai < real_t:
-        return "Likely a real photo"
+        return "Likely real - not made by AI"
     return "The model is not sure - check the heatmaps and the image source"
 
 
@@ -177,11 +177,17 @@ with tab_analyze:
 
         with col_res:
             kind = "fake" if result.is_fake else "uncertain" if result.is_uncertain else "real"
-            title = {"fake": "🤖 AI-GENERATED", "uncertain": "🤔 UNCERTAIN", "real": "✅ REAL PHOTO"}[kind]
+            title = {"fake": "🤖 AI-GENERATED", "uncertain": "🤔 UNCERTAIN", "real": "✅ REAL (NOT AI)"}[kind]
+            verdict = ("Image too small for a reliable verdict" if result.low_resolution
+                       else verdict_text(result.prob_fake, real_t, threshold))
             st.markdown(f"<div class='verdict {kind}'><div class='label'>{title}</div>"
                         f"<div class='pct'>{result.prob_fake:.0%} AI</div>"
-                        f"<div class='conf'>{verdict_text(result.prob_fake, real_t, threshold)}</div></div>",
+                        f"<div class='conf'>{verdict}</div></div>",
                         unsafe_allow_html=True)
+            if result.low_resolution:
+                st.warning(f"This image is only {rgb.shape[1]}×{rgb.shape[0]} px. Images smaller than "
+                           f"{MIN_RELIABLE_SIZE} px lose the fine details the model relies on, so no verdict is "
+                           "given. Try a larger version of the image.")
             st.markdown("<div class='card'>" + ai_meter(result.prob_fake, real_t, threshold)
                         + prob_bar("Real / authentic", result.prob_real, "#10b981") + "</div>",
                         unsafe_allow_html=True)

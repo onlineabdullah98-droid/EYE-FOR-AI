@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ..config import CLASS_NAMES, FAKE_LABEL, MODELS_DIR, UNCERTAIN
+from ..config import CLASS_NAMES, FAKE_LABEL, MIN_RELIABLE_SIZE, MODELS_DIR, UNCERTAIN
 from ..data.transforms import EvalTransform
 from ..explain import GradCAM, cam_to_regions, draw_regions, error_level_analysis, overlay_heatmap
 from ..explain.ela import ELAResult
@@ -31,6 +31,7 @@ class AnalysisResult:
     regions: list[tuple[int, int, int, int]] = field(default_factory=list)
     regions_overlay: np.ndarray | None = None  # original image with suspicious boxes
     ela: ELAResult | None = None
+    low_resolution: bool = False               # image too small for a confident verdict
 
     @property
     def is_fake(self) -> bool:
@@ -49,6 +50,7 @@ class AnalysisResult:
             "prob_real": round(self.prob_real, 4),
             "inference_ms": round(self.inference_ms, 1),
             "model_name": self.model_name,
+            "low_resolution": self.low_resolution,
             "suspicious_regions": [list(map(int, b)) for b in self.regions],
             "ela_mean_error": round(self.ela.mean_error, 3) if self.ela else None,
         }
@@ -93,7 +95,9 @@ class Predictor:
     def preprocess(self, rgb: np.ndarray) -> torch.Tensor:
         return self.transform(rgb).unsqueeze(0).to(self.device)
 
-    def _make_label(self, prob_fake: float) -> tuple[str, float]:
+    def _make_label(self, prob_fake: float, image_shape: tuple[int, ...] | None = None) -> tuple[str, float]:
+        if image_shape is not None and max(image_shape[:2]) < MIN_RELIABLE_SIZE:
+            return UNCERTAIN, max(prob_fake, 1.0 - prob_fake)
         if prob_fake >= self.threshold:
             return self.class_names[FAKE_LABEL], prob_fake
         if prob_fake < min(self.real_threshold, self.threshold):
@@ -107,9 +111,9 @@ class Predictor:
         t0 = time.perf_counter()
         probs = torch.softmax(self.model(self.preprocess(rgb)).float(), dim=1)[0].cpu().numpy()
         elapsed = (time.perf_counter() - t0) * 1000
-        label, conf = self._make_label(float(probs[FAKE_LABEL]))
-        return AnalysisResult(label, conf, float(probs[FAKE_LABEL]), float(probs[1 - FAKE_LABEL]),
-                              elapsed, self.model_name, rgb)
+        label, conf = self._make_label(float(probs[FAKE_LABEL]), rgb.shape)
+        return AnalysisResult(label, conf, float(probs[FAKE_LABEL]), float(probs[1 - FAKE_LABEL]), elapsed,
+                              self.model_name, rgb, low_resolution=max(rgb.shape[:2]) < MIN_RELIABLE_SIZE)
 
     def analyze(
         self,
@@ -128,12 +132,13 @@ class Predictor:
             with torch.no_grad():
                 probs = torch.softmax(self.model(x).float(), dim=1)[0].cpu().numpy()
             prob_fake = float(probs[FAKE_LABEL])
-            label, conf = self._make_label(prob_fake)
+            label, conf = self._make_label(prob_fake, rgb.shape)
             target = FAKE_LABEL if (cam_target == "fake" or prob_fake >= 0.5) else 1 - FAKE_LABEL
             cam, _ = gradcam(x, class_idx=target)
         elapsed = (time.perf_counter() - t0) * 1000
 
-        result = AnalysisResult(label, conf, prob_fake, 1.0 - prob_fake, elapsed, self.model_name, rgb, cam=cam)
+        result = AnalysisResult(label, conf, prob_fake, 1.0 - prob_fake, elapsed, self.model_name, rgb, cam=cam,
+                                low_resolution=max(rgb.shape[:2]) < MIN_RELIABLE_SIZE)
         result.gradcam_overlay = overlay_heatmap(rgb, cam, alpha=cam_alpha)
         if result.is_fake:
             result.regions = cam_to_regions(cam, rgb.shape, threshold=region_threshold)
