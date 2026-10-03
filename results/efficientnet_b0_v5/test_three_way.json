@@ -1,0 +1,10 @@
+{
+  "thresholds": {
+    "real": 0.5,
+    "ai": 0.7146
+  },
+  "uncertain_share": 0.07267144319344931,
+  "real_called_ai": 0.04812348668280872,
+  "ai_called_real": 0.08717748240813135,
+  "accuracy_when_decided": 0.9297277409860192
+}

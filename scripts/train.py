@@ -5,7 +5,7 @@ Examples:
   python scripts/train.py --model efficientnet_b0 --epochs 15 --freeze-epochs 3
   python scripts/train.py --model resnet50 --batch-size 16
   python scripts/train.py --model efficientnet_b2 --class-weights      # imbalanced data (CASIA)
-  python scripts/train.py --model efficientnet_b0 --init-from models/efficientnet_b0_v4.pt --freeze-epochs 0
+  python scripts/train.py --model efficientnet_b0 --init-from models/efficientnet_b0_v5.pt --freeze-epochs 0
 """
 
 from __future__ import annotations

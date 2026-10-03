@@ -1,0 +1,43 @@
+Clean test set: no image was used to train or select any model. Each model uses its own calibrated zone: v4 REAL<0.45 AI>=0.64, v5 REAL<0.50 AI>=0.71.
+
+== REAL images wrongly called AI (lower is better)
+WIDER event/press photos   n=  581  v4  44.2%   v5   9.1%   (v5 uncertain 8.1%)
+Fashionpedia people        n=  469  v4  66.3%   v5   4.1%   (v5 uncertain 4.9%)
+WikiArt paintings          n=  525  v4   2.1%   v5   2.9%   (v5 uncertain 4.4%)
+COCO everyday photos       n=  628  v4   6.5%   v5   4.5%   (v5 uncertain 4.8%)
+Unsplash camera photos     n=  393  v4   7.9%   v5   4.8%   (v5 uncertain 7.4%)
+Unsplash phone photos      n=  111  v4   4.5%   v5   4.5%   (v5 uncertain 8.1%)
+OpenFake real photos       n=  332  v4   1.2%   v5   1.2%   (v5 uncertain 3.3%)
+All real images            n= 3304  v4  20.7%   v5   4.8%   (v5 uncertain 6.1%)
+
+== AI images caught as AI (higher is better)
+AI people (SD 1.4)         n=  900  v4  67.1%   v5  86.2%   (v5 called real 6.1%)
+DiffusionDB AI art         n=  450  v4  86.7%   v5  85.1%   (v5 called real 6.7%)
+OpenFake (2025-26)         n=  907  v4  89.1%   v5  77.5%   (v5 called real 11.4%)
+GenImage                   n=  120  v4  62.5%   v5  59.2%   (v5 called real 28.3%)
+CIFAKE                     n=  166  v4  98.2%   v5  98.8%   (v5 called real 0.6%)
+All AI images              n= 2558  v4  80.3%   v5  82.5%   (v5 called real 8.7%)
+
+== Per AI generator (v5 caught as AI)
+-                      n= 181    98%
+ADM                    n=  29    31%
+BigGAN                 n=  12    83%
+GLIDE                  n=  19    74%
+Midjourney             n=   9    56%
+SD15                   n=  18    67%
+VQDM                   n=  14    36%
+Wukong                 n=  19    84%
+diffusiondb            n= 450    85%
+ernie-image-turbo      n=  11    91%
+flux.2-klein-9b        n= 177    72%
+gpt-image-1.5          n= 111    92%
+illustrious            n= 130    95%
+midjourney-7           n=  77    58%
+personsd               n= 900    86%
+recraft-v2             n=   8    38%
+recraft-v3             n=  17    53%
+seedream-v5.0          n=   9    67%
+sora-2                 n=  10    90%
+veo-3                  n=  45    76%
+wan-video-2.5          n=  20    85%
+z-image-turbo          n= 253    77%

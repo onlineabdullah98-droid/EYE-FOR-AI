@@ -9,7 +9,7 @@ Final Year Project (BSCS/BSAI/BSSE/BSCY). You upload an image and the system:
 
 | Layer | Technology |
 |---|---|
-| Preprocessing & augmentation | OpenCV + torchvision |
+| Preprocessing & augmentation | OpenCV + torchvision, including social-media effects (resize, smoothing, sharpening, JPEG) |
 | Baseline model | Custom 4-block CNN (trained from scratch) |
 | Main model | Transfer learning: **EfficientNet-B0 / B2** or **ResNet50** (ImageNet weights) |
 | Explainability | Grad-CAM, ELA |
@@ -34,9 +34,71 @@ press Ctrl+C.
 
 ## Trained models and results
 
-The app uses **`models/efficientnet_b0_v4.pt`**. Older models are kept in `models/archive/` for comparison.
+The app uses **`models/efficientnet_b0_v5.pt`**. Older models are kept in `models/archive/` for comparison.
 
-### v4: paintings and artwork (default model)
+### v5: real photos of people (default model)
+
+Users reported that real press and red-carpet photos of people were called AI. A measurement confirmed it: v4
+called **44% of real event/press photos and 66% of real fashion photos AI**. Its training set had almost no
+photos of dressed people at events, and many shared copies of real photos are resized, re-compressed, smoothed or
+sharpened. v5 continues from v4 with:
+
+- **WIDER FACE (event categories only):** 4,000 real photos from 24 people/event categories, such as press
+  conferences, award ceremonies, interviews, meetings, dresses, greetings and parades.
+- **Fashionpedia:** 3,000 real photos of dressed people.
+- **Person-centric Stable Diffusion 1.4:** 6,000 AI images of people. Without them, the model would learn
+  "people = real".
+- **Social-media augmentation**, applied to real and AI images alike: shrink and re-enlarge, beauty-filter
+  smoothing, sharpening, and repeated JPEG. The model learns that this processing is not a sign of AI.
+
+The test set has 5,862 images: the clean v4 test set plus 1,950 new images that no model saw.
+
+| Real images wrongly called AI | v4 | **v5** |
+|---|---|---|
+| WIDER event / press photos (581) | 44.2% | **9.1%** |
+| Fashionpedia people (469) | 66.3% | **4.1%** |
+| COCO everyday photos (628) | 6.5% | 4.5% |
+| WikiArt paintings (525) | 2.1% | 2.9% |
+| All real images (3,304) | 20.7% | **4.8%** |
+
+| AI images caught | v4 | **v5** |
+|---|---|---|
+| AI people, SD 1.4 (900) | 67.1% | **86.2%** |
+| DiffusionDB AI art (450) | 86.7% | 85.1% |
+| OpenFake, 2025–26 generators (907) | 89.1% | 77.5% |
+| All AI images (2,558) | 80.3% | **82.5%** |
+
+v5 overall: accuracy 90.0% at a 50% cut-off, ROC-AUC 0.965. With its calibrated zone (REAL below 50%, AI from 71%),
+7.3% of images are UNCERTAIN and **93.0%** of the decided images are correct.
+
+**Trade-off:** v5 catches fewer of the newest generators (OpenFake 89% → 78%). Its ranking ability barely changed
+(OpenFake ROC-AUC 0.986 → 0.979), but its scores moved down after training on processed real photos. If catching
+AI matters more than avoiding false accusations, lower the AI handle of the *Uncertain zone* slider: at 64%,
+v5 catches 82% of OpenFake images. Alternatively, copy `models/archive/efficientnet_b0_v4.pt` into `models/` and
+pick it in the sidebar.
+
+**AI-enhanced real photos** (for example, an old photo run through an "enhance/restore" app) are still often
+called AI. The enhancement leaves the same traces as generation, and this model cannot separate the two.
+
+| Real press photo (v4 said 95% AI) | AI image (GPT-Image-1.5) | Real phone photo |
+|---|---|---|
+| ![press](docs/screenshots/analyze_press.png) | ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) |
+| **Real painting** | **AI painting** | **Small image (no verdict)** |
+| ![painting](docs/screenshots/analyze_painting.png) | ![ai art](docs/screenshots/analyze_ai_art.png) | ![uncertain](docs/screenshots/analyze_uncertain.png) |
+
+To reproduce v5 (after the v4 steps below):
+```bash
+python scripts/download_data.py --dataset wider                       # ~1.8 GB, 7,014 event photos kept
+python scripts/download_data.py --dataset fashionpedia --max-shards 1 # ~480 MB, 6,518 photos
+python scripts/download_data.py --dataset personsd --max-shards 5     # ~2.7 GB, 6,022 AI people
+python scripts/prepare_dataset.py --out data/splits_people --source data/raw/wider@4000:0 \
+    data/raw/fashionpedia@3000:0 data/raw/personsd@0:6000
+# data/splits_v5/<split>.csv = data/splits_v4/<split>.csv + data/splits_people/<split>.csv
+python scripts/train.py --model efficientnet_b0 --splits-dir data/splits_v5 --init-from models/archive/efficientnet_b0_v4.pt \
+    --img-size 160 --epochs 3 --freeze-epochs 0 --lr 2e-4 --out-name efficientnet_b0_v5.pt
+```
+
+### v4: paintings and artwork
 
 v3 had only seen photos as "real". It called **29% of real paintings AI**: art looked like AI to it, because much of
 its AI class was AI art. A user's Mona Lisa came out as 96% AI. v4 continues from v3 with two art sources:
@@ -67,12 +129,6 @@ v4 overall: accuracy 91.4% at a 50% cut-off, ROC-AUC 0.969. With its calibrated 
 `eyeforai/config.py`), the result is UNCERTAIN and the app shows a warning. The AI likelihood is still displayed.
 The Mona Lisa that prompted v4 was a 148×225 px copy. v4 lowers its AI likelihood from 96% to 79%, but the score is
 still high, so this specific image remains a known failure case.
-
-| AI image (GPT-Image-1.5) | Phone photo (v2 said 93% AI) | Small image (Mona Lisa, 148×225) |
-|---|---|---|
-| ![ai](docs/screenshots/analyze_fake.png) | ![real](docs/screenshots/analyze_real.png) | ![uncertain](docs/screenshots/analyze_uncertain.png) |
-| **Real painting (WikiArt)** | **AI painting (Stable Diffusion)** | |
-| ![painting](docs/screenshots/analyze_painting.png) | ![ai art](docs/screenshots/analyze_ai_art.png) | |
 
 To reproduce v4 (after the v3 steps below):
 ```bash
@@ -232,7 +288,7 @@ EYE-FOR-AI/
 │   ├── inference/predictor.py   # Predictor: classify + explain in one call
 │   └── db/history.py            # prediction history (SQLite / PostgreSQL)
 ├── scripts/
-│   ├── download_data.py         # CIFAKE, Faces, GenImage, OpenFake, COCO, Unsplash, CASIA (Kaggle)
+│   ├── download_data.py         # 11 real / AI image sources (HuggingFace, COCO, Unsplash) + CASIA (Kaggle)
 │   ├── prepare_dataset.py       # stratified train/val/test CSV manifests
 │   ├── train.py                 # train any model
 │   ├── evaluate.py              # evaluate a saved checkpoint
@@ -241,7 +297,7 @@ EYE-FOR-AI/
 ├── results/                     # metrics, plots and logs of the included trained models
 ├── docs/screenshots/            # app screenshots
 ├── data/                        # datasets (git-ignored)
-├── models/                      # efficientnet_b0_v4.pt (used by the app) + archive/ with v1-v3 models
+├── models/                      # efficientnet_b0_v5.pt (used by the app) + archive/ with v1-v4 models
 └── outputs/                     # training runs, plots, predictions, history DB (git-ignored)
 ```
 
@@ -330,7 +386,7 @@ The best checkpoint is also copied to `models/<model>_best.pt`, which the app an
 
 To re-evaluate a checkpoint later:
 ```bash
-python scripts/evaluate.py --checkpoint models/efficientnet_b0_v4.pt --split test
+python scripts/evaluate.py --checkpoint models/efficientnet_b0_v5.pt --split test
 ```
 
 **Compute:** training transfer models on the full CIFAKE set is slow on a CPU. Use a GPU (for example Google Colab,
@@ -353,7 +409,7 @@ below) or prepare a smaller split with `--max-per-class`.
 ## 5. Inference and explainability (FYP-2)
 
 ```bash
-python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v4.pt
+python scripts/predict.py my_photo.jpg --checkpoint models/efficientnet_b0_v5.pt
 ```
 This prints a JSON result and saves `outputs/predictions/<folder>_<name>_analysis.png`, a four-panel image:
 Original · Grad-CAM · Suspicious regions · ELA.
@@ -361,7 +417,7 @@ Original · Grad-CAM · Suspicious regions · ELA.
 From Python:
 ```python
 from eyeforai.inference import Predictor
-p = Predictor("models/efficientnet_b0_v4.pt")
+p = Predictor("models/efficientnet_b0_v5.pt")
 r = p.analyze("photo.jpg")
 print(r.label, f"{r.prob_fake:.1%} AI")    # FAKE / REAL / UNCERTAIN, e.g. FAKE 96.3% AI
 r.gradcam_overlay, r.regions_overlay, r.ela.heatmap   # RGB numpy arrays
@@ -429,8 +485,9 @@ test cross-dataset generalisation (train on CIFAKE, evaluate on CASIA with `eval
 
 - A model only knows the kinds of fakes it was trained on. New generators, heavy compression, or screenshots
   reduce accuracy. Present results as decision support, not proof.
-- The v4 model is right on about 93% of the images it decides. About 5% of real images are still called AI, and
-  about 8% of AI images are called real. Images under 256 px get no verdict. It is weakest on Midjourney-7, Recraft, ADM and VQDM images and on edited
+- The v5 model is right on about 93% of the images it decides. About 5% of real images are still called AI, and
+  about 9% of AI images are called real. Images under 256 px get no verdict. Real photos that were run through
+  AI "enhance/restore" apps are often called AI. It is weakest on Midjourney-7, Recraft, ADM and VQDM images and on edited
   (rather than fully generated) photos. Screenshots, heavy filters and very small images also reduce accuracy.
 - Training was done on a CPU at 160 px. Training on a GPU with more OpenFake shards at 224 px should improve results.
 - ELA is not meaningful on PNGs or images that have been re-compressed many times.

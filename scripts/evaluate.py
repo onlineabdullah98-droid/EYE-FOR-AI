@@ -1,6 +1,6 @@
 """Evaluate a saved checkpoint on a split (Accuracy, Precision, Recall, F1, ROC-AUC + plots).
 
-  python scripts/evaluate.py --checkpoint models/efficientnet_b0_v4.pt --split test
+  python scripts/evaluate.py --checkpoint models/efficientnet_b0_v5.pt --split test
 """
 
 from __future__ import annotations

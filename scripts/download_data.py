@@ -18,6 +18,9 @@ Usage:
   python scripts/download_data.py --dataset unsplash --max-per-class 4000    # real camera/phone photos only
   python scripts/download_data.py --dataset wikiart --max-shards 4          # real paintings / artworks only
   python scripts/download_data.py --dataset diffusiondb --max-shards 3      # Stable Diffusion art only
+  python scripts/download_data.py --dataset wider                          # real event / press photos only
+  python scripts/download_data.py --dataset fashionpedia --max-shards 1     # real fashion photos only
+  python scripts/download_data.py --dataset personsd --max-shards 5         # AI images of people only
   python scripts/download_data.py --dataset casia2 --source kaggle
 """
 
@@ -83,7 +86,14 @@ UNSPLASH_REPO = "1aurent/unsplash-lite"                      # 25,000 photos wit
 UNSPLASH_BEFORE = "2021-07"  # only photos submitted before AI image generators became widespread
 WIKIART_REPO, WIKIART_SHARDS = "huggan/wikiart", 72        # 81k artworks by 129 artists, ~520 MB per shard
 DIFFUSIONDB_REPO, DIFFUSIONDB_PARTS = "poloclub/diffusiondb", 2000  # 1,000 Stable Diffusion images per part
-EXTRA_DATASETS = ("coco", "unsplash", "wikiart", "diffusiondb")  # single-class sources with their own downloaders
+EXTRA_DATASETS = ("coco", "unsplash", "wikiart", "diffusiondb", "wider", "fashionpedia", "personsd")  # single-class sources with their own downloaders
+WIDER_REPO = "CUHK-CSE/wider_face"  # 32k event photos in 61 categories; only people/event scenes are kept
+WIDER_EVENTS = ("Press_Conference", "Award_Ceremony", "Interview", "Meeting", "Election_Campain", "Dresses",
+                "Greeting", "Handshaking", "Couple", "Family_Group", "Group", "Ceremony", "Celebration_Or_Party",
+                "Photographers", "Festival", "Shoppers", "Waiter_Waitress", "Students_Schoolkids", "Voter",
+                "Parade", "People_Marching", "Concerts", "Cheering", "Dancing")
+FASHIONPEDIA_REPO = "detection-datasets/fashionpedia"  # 46k real photos of dressed people, ~480 MB per shard
+PERSONSD_REPO = "LGirrbach/person-centric-images-stable-diffusion-v1-4"  # 300+ shards of ~1,200 AI people
 PHONE_MAKES = ("APPLE", "SAMSUNG", "GOOGLE", "HUAWEI", "XIAOMI", "ONEPLUS", "OPPO", "VIVO", "MOTOROLA", "LG", "NOKIA")
 
 
@@ -336,6 +346,60 @@ def download_diffusiondb(target: Path, n_parts: int | None, max_images: int | No
     print(f"  FAKE {n:6d} images")
 
 
+def _hf_parquet_files(repo: str) -> list[str]:
+    with urllib.request.urlopen(f"{HF_BASE}/api/datasets/{repo}/tree/main/data") as resp:
+        return sorted(f["path"] for f in json.load(resp) if f["path"].endswith(".parquet"))
+
+
+def _single_class_parquet(repo: str, target: Path, label: str, prefix: str, n_shards: int | None, default: int,
+                          max_images: int | None) -> None:
+    """Images from a one-class parquet dataset, from evenly spread shards, normalised like the other sources."""
+    import pyarrow.parquet as pq
+
+    files = _hf_parquet_files(repo)
+    cache = target / "_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    rng, n = random.Random(0), 0
+    for i in _spread(n_shards, len(files), default):
+        local = cache / Path(files[i]).name
+        if not local.exists():
+            _download(f"{HF_BASE}/datasets/{repo}/resolve/main/{files[i]}", local)
+        for batch in pq.ParquetFile(local).iter_batches(batch_size=100, columns=["image"]):
+            for img in batch.column("image").to_pylist():
+                if max_images and n >= max_images:
+                    break
+                converted = normalize_image(img["bytes"], rng)
+                if converted:
+                    (target / label).mkdir(parents=True, exist_ok=True)
+                    (target / label / f"{prefix}_{n:06d}{converted[1]}").write_bytes(converted[0])
+                    n += 1
+    shutil.rmtree(cache)
+    print(f"  {label} {n:6d} images")
+
+
+def download_wider(target: Path, max_images: int | None) -> None:
+    """Real event photos (press conferences, award ceremonies, interviews...) from WIDER FACE train + val."""
+    import zipfile
+
+    cache = target / "_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    rng, n = random.Random(0), 0
+    for part in ("WIDER_train", "WIDER_val"):
+        local = cache / f"{part}.zip"
+        if not local.exists():
+            _download(f"{HF_BASE}/datasets/{WIDER_REPO}/resolve/main/data/{part}.zip", local)
+        with zipfile.ZipFile(local) as zf:
+            for f in sorted(zf.namelist()):
+                category = f.split("/")[-2].split("--", 1)[-1] if f.count("/") >= 2 else ""
+                if not f.endswith(".jpg") or category not in WIDER_EVENTS:
+                    continue
+                if max_images and n >= max_images:
+                    break
+                n += _write_real(target / "REAL", f"wider-{category.lower()}_{n:06d}", zf.read(f), rng)
+    shutil.rmtree(cache)
+    print(f"  REAL {n:6d} images")
+
+
 def download_kaggle(dataset: str, target: Path) -> None:
     cmd = ["kaggle", "datasets", "download", "-d", KAGGLE_DATASETS[dataset], "-p", str(target), "--unzip"]
     print("Running:", " ".join(cmd))
@@ -374,6 +438,12 @@ def main() -> None:
         download_wikiart(target, args.max_shards, args.max_per_class)
     elif args.dataset == "diffusiondb":
         download_diffusiondb(target, args.max_shards, args.max_per_class)
+    elif args.dataset == "wider":
+        download_wider(target, args.max_per_class)
+    elif args.dataset == "fashionpedia":
+        _single_class_parquet(FASHIONPEDIA_REPO, target, "REAL", "fashionpedia", args.max_shards, 1, args.max_per_class)
+    elif args.dataset == "personsd":
+        _single_class_parquet(PERSONSD_REPO, target, "FAKE", "personsd", args.max_shards, 5, args.max_per_class)
     elif source == "huggingface":
         download_hf(args.dataset, target, args.max_shards, args.max_per_class, args.splits, args.keep_parquet)
     else:
